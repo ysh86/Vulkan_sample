@@ -4,9 +4,10 @@
 #include <iostream>
 
 std::ostream& operator<<(std::ostream &os, vk::ArrayWrapper1D<uint8_t, VK_UUID_SIZE> const &uuid) {
+    uint8_t const *data = uuid.data();
     os << std::setfill('0') << std::hex;
     for (int j = 0; j < VK_UUID_SIZE; ++j) {
-        os << std::setw(2) << static_cast<uint32_t>(uuid[j]);
+        os << std::setw(2) << static_cast<uint32_t>(data[j]);
         if (j == 3 || j == 5 || j == 7 || j == 9) {
             os << '-';
         }
@@ -46,7 +47,7 @@ int main(int /*argc*/, char ** /*argv*/) {
     try {
         static char const *appName    = "HelloVK";
         static char const *engineName = "Vulkan.hpp";
-        static uint32_t const apiVersion = VK_API_VERSION_1_2;
+        static uint32_t const apiVersion = VK_API_VERSION_1_1;
         std::vector<std::string> const &layers     = {};
         std::vector<std::string> const &extensions = {};
 

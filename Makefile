@@ -12,8 +12,8 @@ INC_FLAGS := $(addprefix -I,$(INC_DIRS))
 
 CPPFLAGS ?= $(INC_FLAGS) -MMD -MP
 
-CFLAGS += -Wall -Werror --std=c99 -O3 -msse2
-CXXFLAGS += -Wall -Werror --std=c++11 -O3 -msse2
+CFLAGS += -Wall -Werror --std=c99 -O3
+CXXFLAGS += -Wall -Werror --std=c++11 -O3
 
 
 # libs
@@ -27,9 +27,14 @@ ifdef WSL_DISTRO_NAME
 	CXX := x86_64-w64-mingw32-g++-posix
 	#CPPFLAGS += -I$(HOME)/SDKs/mingw-std-threads
 	#CXXFLAGS += -O0
+	CFLAGS += -msse2
+	CXXFLAGS += -msse2
 	LDFLAGS += /mnt/c/Windows/System32/vulkan-1.dll -static -lstdc++ -lgcc -lwinpthread
 else
-	LDFLAGS += -framework vulkan
+	#LDFLAGS += -framework vulkan
+	CFLAGS += -march=armv7-a
+	CXXFLAGS += -march=armv7-a
+	LDFLAGS += -lvulkan
 endif
 
 # OpenCV, glm
