@@ -27,14 +27,14 @@ ifdef WSL_DISTRO_NAME
 	CXX := x86_64-w64-mingw32-g++-posix
 	#CPPFLAGS += -I$(HOME)/SDKs/mingw-std-threads
 	#CXXFLAGS += -O0
-	CFLAGS += -msse2
-	CXXFLAGS += -msse2
+	CFLAGS += -mavx2 -mfma
+	CXXFLAGS += -mavx2 -mfma
 	LDFLAGS += /mnt/c/Windows/System32/vulkan-1.dll -static -lstdc++ -lgcc -lwinpthread
 else
-	#LDFLAGS += -framework vulkan
 	CFLAGS += -march=armv7-a
 	CXXFLAGS += -march=armv7-a
 	LDFLAGS += -lvulkan
+	#LDFLAGS += -framework vulkan
 endif
 
 # OpenCV, glm
@@ -43,7 +43,7 @@ endif
 
 # ipp
 ###CPPFLAGS += -I$(HOME)/SDKs/ipp/include
-###LDFLAGS += -L$(HOME)/SDKs/ipp/lib -lippcore -lippcc -lippi -lipps
+###LDFLAGS += -no-pie -L$(HOME)/SDKs/ipp/lib -lippi -lipps -lippcc -lippcore
 
 
 $(BUILD_DIR)/$(TARGET_EXEC): $(OBJS)
