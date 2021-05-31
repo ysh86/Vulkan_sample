@@ -53,9 +53,9 @@ int main(int /*argc*/, char ** /*argv*/) {
 
         uint32_t instanceVersion = vk::enumerateInstanceVersion();
         std::cout << "Instance version: " <<
-            std::to_string(VK_VERSION_MAJOR(instanceVersion)) << "." <<
-            std::to_string(VK_VERSION_MINOR(instanceVersion)) << "." <<
-            std::to_string(VK_VERSION_PATCH(instanceVersion)) << std::endl <<
+            VK_VERSION_MAJOR(instanceVersion) << "." <<
+            VK_VERSION_MINOR(instanceVersion) << "." <<
+            VK_VERSION_PATCH(instanceVersion) << std::endl <<
             std::endl;
 
         // ---------------------------
@@ -63,6 +63,21 @@ int main(int /*argc*/, char ** /*argv*/) {
         // ---------------------------
         // debug
         std::vector<vk::LayerProperties> layerProperties = vk::enumerateInstanceLayerProperties();
+        // instance layers
+        std::cout << "Instance" << " : " << layerProperties.size() << " layers:" << std::endl;
+        std::sort(layerProperties.begin(), layerProperties.end(),
+            [](vk::LayerProperties const &a, vk::LayerProperties const &b) {
+                return ::strcmp(a.layerName, b.layerName) < 0;
+            }
+        );
+        for (auto const &lp : layerProperties ) {
+            std::cout << "\t" << lp.layerName << ":" << std::endl;
+            std::cout << "\t\tVersion: " <<
+                VK_VERSION_MAJOR(lp.specVersion) << "." <<
+                VK_VERSION_MINOR(lp.specVersion) << "." <<
+                VK_VERSION_PATCH(lp.specVersion) << std::endl;
+        }
+        std::cout << std::endl;
 
         std::vector<char const *> enabledLayers;
         enabledLayers.reserve(layers.size());
@@ -94,6 +109,18 @@ int main(int /*argc*/, char ** /*argv*/) {
         // ---------------------------
         // debug
         std::vector<vk::ExtensionProperties> extensionProperties = vk::enumerateInstanceExtensionProperties();
+        // instance extensions
+        std::cout << "Instance" << " : " << extensionProperties.size() << " extensions:" << std::endl;
+        std::sort(extensionProperties.begin(), extensionProperties.end(),
+            [](vk::ExtensionProperties const &a, vk::ExtensionProperties const &b) {
+                return ::strcmp(a.extensionName, b.extensionName) < 0;
+            }
+        );
+        for (auto const &ep : extensionProperties ) {
+            std::cout << "\t" << ep.extensionName << ":" << std::endl;
+            std::cout << "\t\tVersion: " << ep.specVersion << std::endl;
+        }
+        std::cout << std::endl;
 
         std::vector<char const *> enabledExtensions;
         enabledExtensions.reserve(extensions.size());
@@ -115,7 +142,7 @@ int main(int /*argc*/, char ** /*argv*/) {
         }
 
         // ---------------------------
-        // create a UniqueInstance
+        //  create a UniqueInstance
         // ---------------------------
         vk::ApplicationInfo applicationInfo(appName, 1, engineName, 1, apiVersion);
 #if 1
@@ -161,12 +188,15 @@ int main(int /*argc*/, char ** /*argv*/) {
 #endif
 
         // ---------------------------
-        // enumerate the physicalDevices
+        //  enumerate the physicalDevices
         // ---------------------------
         std::vector<vk::PhysicalDevice> physicalDevices = instance->enumeratePhysicalDevices();
 
+        int i = 0;
         for (auto const &physicalDevice : physicalDevices) {
             vk::PhysicalDeviceProperties properties = physicalDevice.getProperties();
+
+            std::cout << "physicalDevices: [" << i << "]" << std::endl;
 
             std::cout << "apiVersion: ";
             std::cout << ((properties.apiVersion >> 22) & 0xfff) << '.';  // Major.
@@ -174,7 +204,19 @@ int main(int /*argc*/, char ** /*argv*/) {
             std::cout << (properties.apiVersion & 0xfff);                 // Patch.
             std::cout << std::endl;
 
-            std::cout << "driverVersion: " << properties.driverVersion << std::endl;
+            uint32_t ver = properties.driverVersion;
+            if (properties.vendorID == 0x10de) {
+                // NVIDIA
+                std::cout << "driverVersion: " <<
+                    ((ver >> 22) & 0x3ff) << "." <<
+                    ((ver >> 14) & 0x0ff) << "." <<
+                    ((ver >> 6)  & 0x0ff) << std::endl;
+            } else {
+                std::cout << "driverVersion: " <<
+                    VK_VERSION_MAJOR(ver) << "." <<
+                    VK_VERSION_MINOR(ver) << "." <<
+                    VK_VERSION_PATCH(ver) << std::endl;
+            }
 
             std::cout << std::showbase << std::internal << std::setfill('0') << std::hex;
             std::cout << "vendorId: " << std::setw(6) << properties.vendorID << std::endl;
@@ -187,7 +229,95 @@ int main(int /*argc*/, char ** /*argv*/) {
 
             std::cout << "pipelineCacheUUID: " << properties.pipelineCacheUUID << std::endl;
             std::cout << std::endl;
+
+            ++i;
         }
+
+        // select a GPU
+        if (i <= 0) {
+            std::cerr << "enumeratePhysicalDevices: PhysicalDevice is not found." << std::endl;
+            exit(1);
+        }
+        i = 0;
+        vk::PhysicalDevice &gpu = physicalDevices.front();
+        // device extensions
+        std::vector<vk::ExtensionProperties> deviceExtensionProperties = gpu.enumerateDeviceExtensionProperties();
+        std::cout << "PhysicalDevice " << i << " : " << deviceExtensionProperties.size() << " extensions:" << std::endl;
+        std::sort(deviceExtensionProperties.begin(), deviceExtensionProperties.end(),
+            [](vk::ExtensionProperties const &a, vk::ExtensionProperties const &b) {
+                return ::strcmp(a.extensionName, b.extensionName) < 0;
+            }
+        );
+        for (auto const &ep : deviceExtensionProperties ) {
+            std::cout << "\t" << ep.extensionName << ":" << std::endl;
+            std::cout << "\t\tVersion: " << ep.specVersion << std::endl;
+        }
+        std::cout << std::endl;
+
+        // ---------------------------
+        //  Create a device
+        // ---------------------------
+        std::vector<vk::QueueFamilyProperties> queueFamilyProperties = gpu.getQueueFamilyProperties();
+        i = 0;
+        for (auto const &qfp : queueFamilyProperties) {
+            std::cout << "queueFamilyProperties: [" << i << "]" << std::endl;
+            std::cout << "count: " << qfp.queueCount << std::endl;
+            std::cout << "flags: " << vk::to_string(qfp.queueFlags) << std::endl;
+            std::cout << std::endl;
+
+            ++i;
+        }
+        // select a queue
+        if (i <= 0 || !(queueFamilyProperties[0].queueFlags & vk::QueueFlagBits::eCompute)) {
+            std::cerr << "queueFamilyProperties: queue is not found." << std::endl;
+            exit(1);
+        }
+        uint32_t queueFamilyIndex = 0;
+        float queuePriority = 0.0f;
+        vk::DeviceQueueCreateInfo deviceQueueCreateInfo({}, queueFamilyIndex, 1, &queuePriority);
+        std::vector<char const *> enabledDeviceLayers;
+        std::vector<char const *> enabledDeviceExtensions; // TODO: request PerformanceQueryFeaturesKHR, HostQueryResetFeatures
+        vk::PhysicalDeviceFeatures const *physicalDeviceFeatures = nullptr;
+        vk::StructureChain<vk::DeviceCreateInfo> deviceCreateInfo(
+            {{}, deviceQueueCreateInfo, enabledDeviceLayers, enabledDeviceExtensions, physicalDeviceFeatures}
+        );
+        vk::UniqueDevice device = gpu.createDeviceUnique(deviceCreateInfo.get<vk::DeviceCreateInfo>());
+
+        // ---------------------------
+        //  Command pool & buffer
+        // ---------------------------
+        vk::CommandPoolCreateInfo commandPoolCreateInfo(vk::CommandPoolCreateFlagBits::eResetCommandBuffer, queueFamilyIndex);
+        vk::UniqueCommandPool commandPool = device->createCommandPoolUnique(commandPoolCreateInfo);
+        vk::CommandBufferAllocateInfo commandBufferAllocateInfo(commandPool.get(), vk::CommandBufferLevel::ePrimary, 1);
+        std::vector<vk::CommandBuffer> commandBuffers = device->allocateCommandBuffers(commandBufferAllocateInfo);
+        vk::CommandBuffer &commandBuffer = commandBuffers.front();
+
+        // ---------------------------
+        //  Queue
+        // ---------------------------
+        vk::Queue computeQueue = device->getQueue(queueFamilyIndex, 0);
+
+        std::cout << &commandBuffer << std::endl;
+        std::cout << &computeQueue << std::endl;
+
+
+        // vkQueueSubmit
+
+
+        // setup_render_pass
+
+        // create_pipeline_cache
+
+        // work group size
+        // shared data size
+        // setup_descriptor_pool
+        // set_layout_bindings
+        // VkDescriptorSetLayoutCreateInfo
+        // VkPipelineLayoutCreateInfo
+        // VkDescriptorSetAllocateInfo
+        // VkComputePipelineCreateInfo
+        // VkSpecializationInfo
+
     } catch (vk::SystemError &err) {
         std::cerr << "vk::SystemError: " << err.what() << std::endl;
         exit(-1);
