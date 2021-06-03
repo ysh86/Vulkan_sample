@@ -2,6 +2,7 @@
 
 #include <iomanip>
 #include <iostream>
+#include <bitset>
 
 std::ostream& operator<<(std::ostream &os, vk::ArrayWrapper1D<uint8_t, VK_UUID_SIZE> const &uuid) {
     uint8_t const *data = uuid.data();
@@ -254,6 +255,21 @@ int main(int /*argc*/, char ** /*argv*/) {
         }
         std::cout << std::endl;
 
+        vk::PhysicalDeviceMemoryProperties physicalDeviceMemoryProperties= gpu.getMemoryProperties();
+        std::cout << "physicalDeviceMemoryProperties.memoryHeaps:" << std::endl;
+        for (uint32_t i = 0; i < physicalDeviceMemoryProperties.memoryHeapCount; ++i) {
+            std::cout << "[" << i << "]: ";
+            std::cout << vk::to_string(physicalDeviceMemoryProperties.memoryHeaps[i].flags);
+            std::cout << ", " << physicalDeviceMemoryProperties.memoryHeaps[i].size << std::endl;
+        }
+        std::cout << "physicalDeviceMemoryProperties.memoryTypes:" << std::endl;
+        for (uint32_t i = 0; i < physicalDeviceMemoryProperties.memoryTypeCount; ++i) {
+            std::cout << "bit" << i << ": ";
+            std::cout << vk::to_string(physicalDeviceMemoryProperties.memoryTypes[i].propertyFlags);
+            std::cout << ", " << "heaps[" << physicalDeviceMemoryProperties.memoryTypes[i].heapIndex << "]" << std::endl;
+        }
+        std::cout << std::endl;
+
         // ---------------------------
         //  Create a device
         // ---------------------------
@@ -268,12 +284,12 @@ int main(int /*argc*/, char ** /*argv*/) {
             ++i;
         }
         // select a queue
-        if (i <= 0 || !(queueFamilyProperties[0].queueFlags & vk::QueueFlagBits::eCompute)) {
-            std::cerr << "queueFamilyProperties: queue is not found." << std::endl;
+        uint32_t queueFamilyIndex = 0;
+        if (i <= 0 || !(queueFamilyProperties[queueFamilyIndex].queueFlags & vk::QueueFlagBits::eCompute)) {
+            std::cerr << "queueFamilyProperties: compute queue is not found." << std::endl;
             exit(1);
         }
-        uint32_t queueFamilyIndex = 0;
-        float queuePriority = 0.0f;
+        float queuePriority = 1.0f;
         vk::DeviceQueueCreateInfo deviceQueueCreateInfo({}, queueFamilyIndex, 1, &queuePriority);
         std::vector<char const *> enabledDeviceLayers;
         std::vector<char const *> enabledDeviceExtensions; // TODO: request PerformanceQueryFeaturesKHR, HostQueryResetFeatures
@@ -282,6 +298,62 @@ int main(int /*argc*/, char ** /*argv*/) {
             {{}, deviceQueueCreateInfo, enabledDeviceLayers, enabledDeviceExtensions, physicalDeviceFeatures}
         );
         vk::UniqueDevice device = gpu.createDeviceUnique(deviceCreateInfo.get<vk::DeviceCreateInfo>());
+        //  queue
+        vk::Queue computeQueue = device->getQueue(queueFamilyIndex, 0);
+
+        // ---------------------------
+        //  Buffers
+        // ---------------------------
+        constexpr size_t bufferSize = 1920*1080*3/2;
+        vk::BufferCreateInfo bufferCreateInfo({}, bufferSize, vk::BufferUsageFlagBits::eStorageBuffer);
+        vk::UniqueBuffer buffer = device->createBufferUnique(bufferCreateInfo);
+        vk::MemoryRequirements memoryRequirements = device->getBufferMemoryRequirements(buffer.get());
+        auto f = [&](vk::Flags<vk::MemoryPropertyFlagBits> properties) {
+            for (uint32_t i = 0; i < physicalDeviceMemoryProperties.memoryTypeCount; ++i) {
+                if ((memoryRequirements.memoryTypeBits & (1 << i)) &&
+                   ((physicalDeviceMemoryProperties.memoryTypes[i].propertyFlags & properties) == properties)) {
+                    return i;
+                }
+            }
+            return 0xffffffffU;
+        };
+        vk::MemoryAllocateInfo memoryAllocateInfo(memoryRequirements.size, f(vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eHostVisible));
+        vk::UniqueDeviceMemory bufferMemory = device->allocateMemoryUnique(memoryAllocateInfo);
+        device->bindBufferMemory(buffer.get(), bufferMemory.get(), 0);
+
+        std::cout << "bufferSize: " << bufferSize << std::endl;
+        std::cout << "memoryRequirements.size: " << memoryRequirements.size << std::endl;
+        std::cout << "memoryRequirements.alignment: " << memoryRequirements.alignment << std::endl;
+        std::cout << "memoryRequirements.memoryTypeBits: " << std::bitset<32>(memoryRequirements.memoryTypeBits) << std::dec << std::endl;
+
+        // ---------------------------
+        //  Descriptor Set
+        // ---------------------------
+        // Layout
+        vk::DescriptorSetLayoutBinding descriptorSetLayoutBinding(0, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute);
+        vk::DescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo({}, 1, &descriptorSetLayoutBinding);
+        vk::UniqueDescriptorSetLayout descriptorSetLayout = device->createDescriptorSetLayoutUnique(descriptorSetLayoutCreateInfo);
+        // Pool
+        vk::DescriptorPoolSize descriptorPoolSize(vk::DescriptorType::eStorageBuffer, 1);
+        vk::DescriptorPoolCreateInfo descriptorPoolCreateInfo({}, 1, 1, &descriptorPoolSize);
+        vk::UniqueDescriptorPool descriptorPool = device->createDescriptorPoolUnique(descriptorPoolCreateInfo);
+        // Alloc
+        vk::DescriptorSetAllocateInfo descriptorSetAllocateInfo(descriptorPool.get(), 1, &(descriptorSetLayout.get()));
+        std::vector<vk::DescriptorSet> descriptorSets = device->allocateDescriptorSets(descriptorSetAllocateInfo);
+        vk::DescriptorSet &descriptorSet = descriptorSets.front();
+        // bind
+        vk::DescriptorBufferInfo descriptorBufferInfo(buffer.get(), 0, bufferSize);
+        vk::WriteDescriptorSet writeDescriptorSet(descriptorSet, 0, {}, 1, vk::DescriptorType::eStorageBuffer, {}, &descriptorBufferInfo);
+        device->updateDescriptorSets(1, &writeDescriptorSet, 0, nullptr);
+
+        // ---------------------------
+        //  Compute pipeline
+        // ---------------------------
+        // shader
+        
+        // pipeline
+        // VkPipelineLayoutCreateInfo
+        // VkComputePipelineCreateInfo
 
         // ---------------------------
         //  Command pool & buffer
@@ -292,30 +364,15 @@ int main(int /*argc*/, char ** /*argv*/) {
         std::vector<vk::CommandBuffer> commandBuffers = device->allocateCommandBuffers(commandBufferAllocateInfo);
         vk::CommandBuffer &commandBuffer = commandBuffers.front();
 
-        // ---------------------------
-        //  Queue
-        // ---------------------------
-        vk::Queue computeQueue = device->getQueue(queueFamilyIndex, 0);
-
         std::cout << &commandBuffer << std::endl;
         std::cout << &computeQueue << std::endl;
 
 
+        // vkMapMemory
         // vkQueueSubmit
-
-
-        // setup_render_pass
-
-        // create_pipeline_cache
 
         // work group size
         // shared data size
-        // setup_descriptor_pool
-        // set_layout_bindings
-        // VkDescriptorSetLayoutCreateInfo
-        // VkPipelineLayoutCreateInfo
-        // VkDescriptorSetAllocateInfo
-        // VkComputePipelineCreateInfo
         // VkSpecializationInfo
 
     } catch (vk::SystemError &err) {
