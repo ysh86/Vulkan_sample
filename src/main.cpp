@@ -357,10 +357,19 @@ int main(int /*argc*/, char ** /*argv*/) {
         //  Compute pipeline
         // ---------------------------
         // shader
-        
+        // TODO: load from disk ...
+        size_t codeSize = 0;
+        uint32_t *pCode = nullptr;
+        vk::ShaderModuleCreateInfo shaderModuleCreateInfo({}, codeSize, pCode);
+        vk::UniqueShaderModule computeShaderModule = device->createShaderModuleUnique(shaderModuleCreateInfo);
+
         // pipeline
-        // VkPipelineLayoutCreateInfo
-        // VkComputePipelineCreateInfo
+        vk::PipelineShaderStageCreateInfo pipelineShaderStageCreateInfo({}, vk::ShaderStageFlagBits::eCompute, computeShaderModule.get(), "main");
+        vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo({}, 1, &(descriptorSetLayout.get()));
+        vk::UniquePipelineLayout pipelineLayout = device->createPipelineLayoutUnique(pipelineLayoutCreateInfo);
+        vk::ComputePipelineCreateInfo computePipelineCreateInfo({}, pipelineShaderStageCreateInfo, pipelineLayout.get());
+        vk::UniquePipeline computePipeline = device->createComputePipelineUnique(nullptr, computePipelineCreateInfo);
+
 
         // ---------------------------
         //  Command pool & Command buffer
@@ -375,13 +384,17 @@ int main(int /*argc*/, char ** /*argv*/) {
         // ---------------------------
         //  exec
         // ---------------------------
-        commandBuffer->begin(vk::CommandBufferBeginInfo(vk::CommandBufferUsageFlags()));
-        // ...
+        vk::CommandBufferBeginInfo beginInfo(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
+        commandBuffer->begin(beginInfo);
+        {
+            commandBuffer->bindPipeline(vk::PipelineBindPoint::eCompute, computePipeline.get());
+            commandBuffer->bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipelineLayout.get(), 0, 1, &(descriptorSet.get()), 0, nullptr);
+            commandBuffer->dispatch(1024/32, 1024/32, 1); // TODO: x, y, z
+        }
         commandBuffer->end();
 
         vk::UniqueFence fence = device->createFenceUnique(vk::FenceCreateInfo());
-
-        vk::SubmitInfo submitInfo({}, {}, *commandBuffer);
+        vk::SubmitInfo submitInfo({}, {}, commandBuffer.get());
         computeQueue.submit(submitInfo, fence.get());
 
         constexpr uint64_t FenceTimeout100m = 100000000;
@@ -397,11 +410,13 @@ int main(int /*argc*/, char ** /*argv*/) {
             exit(-1);
         }
 
+        // ---------------------------
+        //  save results
+        // ---------------------------
         // vkMapMemory
 
         // work group size
         // shared data size
-        // VkSpecializationInfo
 
     } catch (vk::SystemError &err) {
         std::cerr << "vk::SystemError: " << err.what() << std::endl;
