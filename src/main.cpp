@@ -46,9 +46,12 @@ debugUtilsMessengerCallback(
 
 int main(int /*argc*/, char ** /*argv*/) {
     try {
-        static char const *appName    = "HelloVK";
-        static char const *engineName = "Vulkan.hpp";
-        static uint32_t const apiVersion = VK_API_VERSION_1_1;
+        static char const *appName          = "HelloVK";
+        static uint32_t const appVersion    = VK_MAKE_VERSION(0, 0, 1);
+        static char const *engineName       = "Vulkan.hpp";
+        static uint32_t const engineVersion = VK_HEADER_VERSION_COMPLETE;
+        static uint32_t const apiVersion    = VK_API_VERSION_1_1;
+
         std::vector<std::string> const &layers     = {};
         std::vector<std::string> const &extensions = {};
 
@@ -145,7 +148,7 @@ int main(int /*argc*/, char ** /*argv*/) {
         // ---------------------------
         //  create a UniqueInstance
         // ---------------------------
-        vk::ApplicationInfo applicationInfo(appName, 1, engineName, 1, apiVersion);
+        vk::ApplicationInfo applicationInfo(appName, appVersion, engineName, engineVersion, apiVersion);
 #if 1
         // in non-debug mode: just use the InstanceCreateInfo for instance creation
         vk::StructureChain<vk::InstanceCreateInfo> instanceCreateInfo(
@@ -199,11 +202,11 @@ int main(int /*argc*/, char ** /*argv*/) {
 
             std::cout << "physicalDevices: [" << i << "]" << std::endl;
 
+            // Properties
             std::cout << "apiVersion: ";
-            std::cout << ((properties.apiVersion >> 22) & 0xfff) << '.';  // Major.
-            std::cout << ((properties.apiVersion >> 12) & 0x3ff) << '.';  // Minor.
-            std::cout << (properties.apiVersion & 0xfff);                 // Patch.
-            std::cout << std::endl;
+            std::cout << VK_VERSION_MAJOR(properties.apiVersion) << '.';
+            std::cout << VK_VERSION_MINOR(properties.apiVersion) << '.';
+            std::cout << VK_VERSION_PATCH(properties.apiVersion) << std::endl;
 
             uint32_t ver = properties.driverVersion;
             if (properties.vendorID == 0x10de) {
@@ -231,6 +234,9 @@ int main(int /*argc*/, char ** /*argv*/) {
             std::cout << "pipelineCacheUUID: " << properties.pipelineCacheUUID << std::endl;
             std::cout << std::endl;
 
+            // Features
+            //vk::PhysicalDeviceFeatures features = physicalDevice.getFeatures();
+
             ++i;
         }
 
@@ -240,7 +246,7 @@ int main(int /*argc*/, char ** /*argv*/) {
             exit(1);
         }
         i = 0;
-        vk::PhysicalDevice &gpu = physicalDevices.front();
+        vk::PhysicalDevice &gpu = physicalDevices[i];
         // device extensions
         std::vector<vk::ExtensionProperties> deviceExtensionProperties = gpu.enumerateDeviceExtensionProperties();
         std::cout << "PhysicalDevice " << i << " : " << deviceExtensionProperties.size() << " extensions:" << std::endl;
@@ -339,11 +345,12 @@ int main(int /*argc*/, char ** /*argv*/) {
         vk::UniqueDescriptorPool descriptorPool = device->createDescriptorPoolUnique(descriptorPoolCreateInfo);
         // Alloc
         vk::DescriptorSetAllocateInfo descriptorSetAllocateInfo(descriptorPool.get(), 1, &(descriptorSetLayout.get()));
-        std::vector<vk::DescriptorSet> descriptorSets = device->allocateDescriptorSets(descriptorSetAllocateInfo);
-        vk::DescriptorSet &descriptorSet = descriptorSets.front();
+        vk::UniqueDescriptorSet descriptorSet = std::move(
+            device->allocateDescriptorSetsUnique(descriptorSetAllocateInfo).front()
+        );
         // bind
         vk::DescriptorBufferInfo descriptorBufferInfo(buffer.get(), 0, bufferSize);
-        vk::WriteDescriptorSet writeDescriptorSet(descriptorSet, 0, {}, 1, vk::DescriptorType::eStorageBuffer, {}, &descriptorBufferInfo);
+        vk::WriteDescriptorSet writeDescriptorSet(descriptorSet.get(), 0, {}, 1, vk::DescriptorType::eStorageBuffer, {}, &descriptorBufferInfo);
         device->updateDescriptorSets(1, &writeDescriptorSet, 0, nullptr);
 
         // ---------------------------
@@ -356,20 +363,41 @@ int main(int /*argc*/, char ** /*argv*/) {
         // VkComputePipelineCreateInfo
 
         // ---------------------------
-        //  Command pool & buffer
+        //  Command pool & Command buffer
         // ---------------------------
         vk::CommandPoolCreateInfo commandPoolCreateInfo(vk::CommandPoolCreateFlagBits::eResetCommandBuffer, queueFamilyIndex);
         vk::UniqueCommandPool commandPool = device->createCommandPoolUnique(commandPoolCreateInfo);
         vk::CommandBufferAllocateInfo commandBufferAllocateInfo(commandPool.get(), vk::CommandBufferLevel::ePrimary, 1);
-        std::vector<vk::CommandBuffer> commandBuffers = device->allocateCommandBuffers(commandBufferAllocateInfo);
-        vk::CommandBuffer &commandBuffer = commandBuffers.front();
+        vk::UniqueCommandBuffer commandBuffer = std::move(
+            device->allocateCommandBuffersUnique(commandBufferAllocateInfo).front()
+        );
 
-        std::cout << &commandBuffer << std::endl;
-        std::cout << &computeQueue << std::endl;
+        // ---------------------------
+        //  exec
+        // ---------------------------
+        commandBuffer->begin(vk::CommandBufferBeginInfo(vk::CommandBufferUsageFlags()));
+        // ...
+        commandBuffer->end();
 
+        vk::UniqueFence fence = device->createFenceUnique(vk::FenceCreateInfo());
+
+        vk::SubmitInfo submitInfo({}, {}, *commandBuffer);
+        computeQueue.submit(submitInfo, fence.get());
+
+        constexpr uint64_t FenceTimeout100m = 100000000;
+        vk::Result result;
+        int timeouts = -1;
+        do {
+            result = device->waitForFences(fence.get(), true, FenceTimeout100m);
+            timeouts++;
+        } while (result == vk::Result::eTimeout);
+        assert(result == vk::Result::eSuccess);
+        if (timeouts != 0) {
+            std::cerr << "Unsuitable timeout value, exiting" << std::endl;
+            exit(-1);
+        }
 
         // vkMapMemory
-        // vkQueueSubmit
 
         // work group size
         // shared data size
@@ -386,6 +414,6 @@ int main(int /*argc*/, char ** /*argv*/) {
         exit(-1);
     }
 
-    std::cout << "done" << std::endl;
+    std::cout << std::endl << "done" << std::endl;
     return 0;
 }
