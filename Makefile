@@ -37,6 +37,11 @@ else
 	#LDFLAGS += -framework vulkan
 endif
 
+# stb
+CPPFLAGS += -I$(HOME)/SDKs/stb
+CFLAGS += -Wno-error=sign-compare
+CXXFLAGS += -Wno-error=sign-compare
+
 # OpenCV, glm
 ###CPPFLAGS += `pkg-config --cflags opencv glm`
 ###LDFLAGS += `pkg-config --libs opencv`

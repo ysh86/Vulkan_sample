@@ -2,7 +2,22 @@
 
 #include <iomanip>
 #include <iostream>
+#include <fstream>
 #include <bitset>
+
+#define STBIW_WINDOWS_UTF8
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
+
+constexpr const char *resultFile = "result.png";
+constexpr const char *kernelFile = "src/hello.spv";
+constexpr const char *kernelName = "main";
+constexpr const int W = 3200;
+constexpr const int H = 2400;
+constexpr const int WORKGROUP_SIZE = 32;
+typedef struct {
+    float r, g, b, a;
+} pixel_t;
 
 std::ostream& operator<<(std::ostream &os, vk::ArrayWrapper1D<uint8_t, VK_UUID_SIZE> const &uuid) {
     uint8_t const *data = uuid.data();
@@ -40,7 +55,17 @@ debugUtilsMessengerCallback(
     VkDebugUtilsMessageTypeFlagsEXT              messageTypes,
     VkDebugUtilsMessengerCallbackDataEXT const * pCallbackData,
     void * /*pUserData*/) {
-    // TODO: impl
+    std::cerr << "================ Debug ================" << std::endl;
+    std::cerr << vk::to_string(static_cast<vk::DebugUtilsMessageSeverityFlagBitsEXT>(messageSeverity)) << std::endl;
+    std::cerr << vk::to_string(static_cast<vk::DebugUtilsMessageTypeFlagBitsEXT>(messageTypes)) << std::endl;
+    std::cerr << pCallbackData->pMessageIdName << " " << pCallbackData->messageIdNumber << " " << pCallbackData->pMessage << " " << pCallbackData->pNext << std::endl;
+    auto pNext = static_cast<VkDebugUtilsMessengerCallbackDataEXT const *>(pCallbackData->pNext);
+    while (pNext) {
+        std::cerr << pNext->pMessageIdName << " " << pNext->messageIdNumber << " " << pNext->pMessage << " " << pNext->pNext << std::endl;
+        pNext = static_cast<VkDebugUtilsMessengerCallbackDataEXT const *>(pNext->pNext);
+    }
+    std::cerr << "=======================================" << std::endl;
+
     return VK_TRUE;
 }
 
@@ -310,7 +335,7 @@ int main(int /*argc*/, char ** /*argv*/) {
         // ---------------------------
         //  Buffers
         // ---------------------------
-        constexpr size_t bufferSize = 1920*1080*3/2;
+        constexpr size_t bufferSize = W * H * sizeof(pixel_t);
         vk::BufferCreateInfo bufferCreateInfo({}, bufferSize, vk::BufferUsageFlagBits::eStorageBuffer);
         vk::UniqueBuffer buffer = device->createBufferUnique(bufferCreateInfo);
         vk::MemoryRequirements memoryRequirements = device->getBufferMemoryRequirements(buffer.get());
@@ -318,6 +343,7 @@ int main(int /*argc*/, char ** /*argv*/) {
             for (uint32_t i = 0; i < physicalDeviceMemoryProperties.memoryTypeCount; ++i) {
                 if ((memoryRequirements.memoryTypeBits & (1 << i)) &&
                    ((physicalDeviceMemoryProperties.memoryTypes[i].propertyFlags & properties) == properties)) {
+                    std::cout << "select bit: " << i << std::endl;
                     return i;
                 }
             }
@@ -357,14 +383,21 @@ int main(int /*argc*/, char ** /*argv*/) {
         //  Compute pipeline
         // ---------------------------
         // shader
-        // TODO: load from disk ...
-        size_t codeSize = 0;
-        uint32_t *pCode = nullptr;
+        std::ifstream from(kernelFile);
+        std::vector<char> kernelSpv((std::istreambuf_iterator<char>(from)),
+                                     std::istreambuf_iterator<char>());
+        from.close();
+        size_t r = kernelSpv.size() & (sizeof(uint32_t) - 1);
+        for (size_t i = 0; i < r; ++i) {
+            kernelSpv.push_back(0);
+        }
+        size_t codeSize = kernelSpv.size();
+        uint32_t *pCode = reinterpret_cast<uint32_t *>(kernelSpv.data());
         vk::ShaderModuleCreateInfo shaderModuleCreateInfo({}, codeSize, pCode);
         vk::UniqueShaderModule computeShaderModule = device->createShaderModuleUnique(shaderModuleCreateInfo);
 
         // pipeline
-        vk::PipelineShaderStageCreateInfo pipelineShaderStageCreateInfo({}, vk::ShaderStageFlagBits::eCompute, computeShaderModule.get(), "main");
+        vk::PipelineShaderStageCreateInfo pipelineShaderStageCreateInfo({}, vk::ShaderStageFlagBits::eCompute, computeShaderModule.get(), kernelName);
         vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo({}, 1, &(descriptorSetLayout.get()));
         vk::UniquePipelineLayout pipelineLayout = device->createPipelineLayoutUnique(pipelineLayoutCreateInfo);
         vk::ComputePipelineCreateInfo computePipelineCreateInfo({}, pipelineShaderStageCreateInfo, pipelineLayout.get());
@@ -389,19 +422,23 @@ int main(int /*argc*/, char ** /*argv*/) {
         {
             commandBuffer->bindPipeline(vk::PipelineBindPoint::eCompute, computePipeline.get());
             commandBuffer->bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipelineLayout.get(), 0, 1, &(descriptorSet.get()), 0, nullptr);
-            commandBuffer->dispatch(1024/32, 1024/32, 1); // TODO: x, y, z
+            commandBuffer->dispatch(W/WORKGROUP_SIZE, H/WORKGROUP_SIZE, 1);
         }
         commandBuffer->end();
 
         vk::UniqueFence fence = device->createFenceUnique(vk::FenceCreateInfo());
         vk::SubmitInfo submitInfo({}, {}, commandBuffer.get());
+
+        std::cout << "Run: ";
+
         computeQueue.submit(submitInfo, fence.get());
 
-        constexpr uint64_t FenceTimeout100m = 100000000;
+        //constexpr uint64_t FenceTimeout100ms = 100000000;
+        constexpr uint64_t FenceTimeout100s = 100000000000;
         vk::Result result;
         int timeouts = -1;
         do {
-            result = device->waitForFences(fence.get(), true, FenceTimeout100m);
+            result = device->waitForFences(fence.get(), true, FenceTimeout100s);
             timeouts++;
         } while (result == vk::Result::eTimeout);
         assert(result == vk::Result::eSuccess);
@@ -409,6 +446,8 @@ int main(int /*argc*/, char ** /*argv*/) {
             std::cerr << "Unsuitable timeout value, exiting" << std::endl;
             exit(-1);
         }
+
+        std::cout << "done" << std::endl;
 
         // ---------------------------
         //  save results
