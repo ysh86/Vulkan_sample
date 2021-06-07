@@ -71,14 +71,14 @@ debugUtilsMessengerCallback(
 
 int main(int /*argc*/, char ** /*argv*/) {
     try {
-        static char const *appName          = "HelloVK";
-        static uint32_t const appVersion    = VK_MAKE_VERSION(0, 0, 1);
-        static char const *engineName       = "Vulkan.hpp";
-        static uint32_t const engineVersion = VK_HEADER_VERSION_COMPLETE;
-        static uint32_t const apiVersion    = VK_API_VERSION_1_1;
+        constexpr char const *appName          = "HelloVK";
+        constexpr uint32_t const appVersion    = VK_MAKE_VERSION(0, 0, 1);
+        constexpr char const *engineName       = "Vulkan.hpp";
+        constexpr uint32_t const engineVersion = VK_HEADER_VERSION_COMPLETE;
+        constexpr uint32_t const apiVersion    = VK_API_VERSION_1_1;
 
-        std::vector<std::string> const &layers     = {};
-        std::vector<std::string> const &extensions = {};
+        std::vector<std::string> const layers     = {};
+        std::vector<std::string> const extensions = {};
 
         uint32_t instanceVersion = vk::enumerateInstanceVersion();
         std::cout << "Instance version: " <<
@@ -321,12 +321,12 @@ int main(int /*argc*/, char ** /*argv*/) {
             exit(1);
         }
         float queuePriority = 1.0f;
-        vk::DeviceQueueCreateInfo deviceQueueCreateInfo({}, queueFamilyIndex, 1, &queuePriority);
+        vk::DeviceQueueCreateInfo deviceQueueCreateInfo({}, queueFamilyIndex, queuePriority);
         std::vector<char const *> enabledDeviceLayers;
         std::vector<char const *> enabledDeviceExtensions; // TODO: request PerformanceQueryFeaturesKHR, HostQueryResetFeatures
-        vk::PhysicalDeviceFeatures const *physicalDeviceFeatures = nullptr;
+        vk::PhysicalDeviceFeatures physicalDeviceFeatures = {};
         vk::StructureChain<vk::DeviceCreateInfo> deviceCreateInfo(
-            {{}, deviceQueueCreateInfo, enabledDeviceLayers, enabledDeviceExtensions, physicalDeviceFeatures}
+            {{}, deviceQueueCreateInfo, enabledDeviceLayers, enabledDeviceExtensions, &physicalDeviceFeatures}
         );
         vk::UniqueDevice device = gpu.createDeviceUnique(deviceCreateInfo.get<vk::DeviceCreateInfo>());
         //  queue
@@ -336,7 +336,7 @@ int main(int /*argc*/, char ** /*argv*/) {
         //  Buffers
         // ---------------------------
         constexpr size_t bufferSize = W * H * sizeof(pixel_t);
-        vk::BufferCreateInfo bufferCreateInfo({}, bufferSize, vk::BufferUsageFlagBits::eStorageBuffer);
+        vk::BufferCreateInfo bufferCreateInfo({}, bufferSize, vk::BufferUsageFlagBits::eStorageBuffer, vk::SharingMode::eExclusive, queueFamilyIndex);
         vk::UniqueBuffer buffer = device->createBufferUnique(bufferCreateInfo);
         vk::MemoryRequirements memoryRequirements = device->getBufferMemoryRequirements(buffer.get());
         auto f = [&](vk::Flags<vk::MemoryPropertyFlagBits> properties) {
@@ -363,27 +363,27 @@ int main(int /*argc*/, char ** /*argv*/) {
         // ---------------------------
         // Layout
         vk::DescriptorSetLayoutBinding descriptorSetLayoutBinding(0, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute);
-        vk::DescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo({}, 1, &descriptorSetLayoutBinding);
+        vk::DescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo({}, descriptorSetLayoutBinding);
         vk::UniqueDescriptorSetLayout descriptorSetLayout = device->createDescriptorSetLayoutUnique(descriptorSetLayoutCreateInfo);
         // Pool
         vk::DescriptorPoolSize descriptorPoolSize(vk::DescriptorType::eStorageBuffer, 1);
-        vk::DescriptorPoolCreateInfo descriptorPoolCreateInfo({}, 1, 1, &descriptorPoolSize);
+        vk::DescriptorPoolCreateInfo descriptorPoolCreateInfo({}, 1, descriptorPoolSize);
         vk::UniqueDescriptorPool descriptorPool = device->createDescriptorPoolUnique(descriptorPoolCreateInfo);
         // Alloc
-        vk::DescriptorSetAllocateInfo descriptorSetAllocateInfo(descriptorPool.get(), 1, &(descriptorSetLayout.get()));
+        vk::DescriptorSetAllocateInfo descriptorSetAllocateInfo(descriptorPool.get(), descriptorSetLayout.get());
         vk::UniqueDescriptorSet descriptorSet = std::move(
             device->allocateDescriptorSetsUnique(descriptorSetAllocateInfo).front()
         );
         // bind
         vk::DescriptorBufferInfo descriptorBufferInfo(buffer.get(), 0, bufferSize);
-        vk::WriteDescriptorSet writeDescriptorSet(descriptorSet.get(), 0, {}, 1, vk::DescriptorType::eStorageBuffer, {}, &descriptorBufferInfo);
-        device->updateDescriptorSets(1, &writeDescriptorSet, 0, nullptr);
+        vk::WriteDescriptorSet writeDescriptorSet(descriptorSet.get(), 0, {}, vk::DescriptorType::eStorageBuffer, {}, descriptorBufferInfo, {});
+        device->updateDescriptorSets(writeDescriptorSet, {});
 
         // ---------------------------
         //  Compute pipeline
         // ---------------------------
         // shader
-        std::ifstream from(kernelFile);
+        std::ifstream from(kernelFile, std::ios::in | std::ios::binary);
         std::vector<char> kernelSpv((std::istreambuf_iterator<char>(from)),
                                      std::istreambuf_iterator<char>());
         from.close();
@@ -398,10 +398,10 @@ int main(int /*argc*/, char ** /*argv*/) {
 
         // pipeline
         vk::PipelineShaderStageCreateInfo pipelineShaderStageCreateInfo({}, vk::ShaderStageFlagBits::eCompute, computeShaderModule.get(), kernelName);
-        vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo({}, 1, &(descriptorSetLayout.get()));
+        vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo({}, descriptorSetLayout.get());
         vk::UniquePipelineLayout pipelineLayout = device->createPipelineLayoutUnique(pipelineLayoutCreateInfo);
         vk::ComputePipelineCreateInfo computePipelineCreateInfo({}, pipelineShaderStageCreateInfo, pipelineLayout.get());
-        vk::UniquePipeline computePipeline = device->createComputePipelineUnique(nullptr, computePipelineCreateInfo);
+        vk::UniquePipeline computePipeline = device->createComputePipelineUnique({}, computePipelineCreateInfo);
 
 
         // ---------------------------
@@ -452,7 +452,25 @@ int main(int /*argc*/, char ** /*argv*/) {
         // ---------------------------
         //  save results
         // ---------------------------
-        // vkMapMemory
+        std::cout << "Save: ";
+        {
+            pixel_t* mappedMemory = static_cast<pixel_t *>(device->mapMemory(bufferMemory.get(), 0, bufferSize));
+
+            std::vector<uint8_t> image;
+            image.reserve(W * H * 4);
+            for (int i = 0; i < W*H; ++i) {
+                image.push_back(static_cast<uint8_t>(255.0f * mappedMemory[i].r + 0.5f));
+                image.push_back(static_cast<uint8_t>(255.0f * mappedMemory[i].g + 0.5f));
+                image.push_back(static_cast<uint8_t>(255.0f * mappedMemory[i].b + 0.5f));
+                image.push_back(static_cast<uint8_t>(255.0f * mappedMemory[i].a + 0.5f));
+            }
+
+            device->unmapMemory(bufferMemory.get());
+            mappedMemory = nullptr;
+
+            stbi_write_png(resultFile, W, H, 4, image.data(), W*4);
+        }
+        std::cout << "done" << std::endl;
 
         // work group size
         // shared data size
