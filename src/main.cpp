@@ -9,6 +9,9 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
+#define NDEBUG 1
+#define DEBUG (!NDEBUG)
+
 constexpr const char *resultFile = "result.png";
 constexpr const char *kernelFile = "src/hello.spv";
 constexpr const char *kernelName = "main";
@@ -32,7 +35,7 @@ std::ostream& operator<<(std::ostream &os, vk::ArrayWrapper1D<uint8_t, VK_UUID_S
     return os;
 }
 
-// debug
+// for debug utils
 PFN_vkCreateDebugUtilsMessengerEXT  pfnVkCreateDebugUtilsMessengerEXT;
 PFN_vkDestroyDebugUtilsMessengerEXT pfnVkDestroyDebugUtilsMessengerEXT;
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateDebugUtilsMessengerEXT(
@@ -78,7 +81,11 @@ int main(int /*argc*/, char ** /*argv*/) {
         constexpr uint32_t const apiVersion    = VK_API_VERSION_1_1;
 
         std::vector<std::string> const layers     = {};
+#if !DEBUG
         std::vector<std::string> const extensions = {};
+#else
+        std::vector<std::string> const extensions = {VK_EXT_DEBUG_UTILS_EXTENSION_NAME};
+#endif
 
         uint32_t instanceVersion = vk::enumerateInstanceVersion();
         std::cout << "Instance version: " <<
@@ -174,7 +181,7 @@ int main(int /*argc*/, char ** /*argv*/) {
         //  create a UniqueInstance
         // ---------------------------
         vk::ApplicationInfo applicationInfo(appName, appVersion, engineName, engineVersion, apiVersion);
-#if 1
+#if !DEBUG
         // in non-debug mode: just use the InstanceCreateInfo for instance creation
         vk::StructureChain<vk::InstanceCreateInfo> instanceCreateInfo(
             {{}, &applicationInfo, enabledLayers, enabledExtensions}
@@ -183,6 +190,8 @@ int main(int /*argc*/, char ** /*argv*/) {
 #else
         // in debug mode: addionally use the debugUtilsMessengerCallback in instance creation!
         vk::DebugUtilsMessageSeverityFlagsEXT severityFlags(
+            vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose |
+            vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo |
             vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning |
             vk::DebugUtilsMessageSeverityFlagBitsEXT::eError
         );
@@ -191,9 +200,10 @@ int main(int /*argc*/, char ** /*argv*/) {
             vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance |
             vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation
         );
+        vk::DebugUtilsMessengerCreateInfoEXT debugUtilsMessengerCreateInfoEXT({}, severityFlags, messageTypeFlags, debugUtilsMessengerCallback);
         vk::StructureChain<vk::InstanceCreateInfo, vk::DebugUtilsMessengerCreateInfoEXT> instanceCreateInfo(
             {{}, &applicationInfo, enabledLayers, enabledExtensions},
-            {{}, severityFlags, messageTypeFlags, debugUtilsMessengerCallback}
+            debugUtilsMessengerCreateInfoEXT
         );
         vk::UniqueInstance instance = vk::createInstanceUnique(instanceCreateInfo.get<vk::InstanceCreateInfo>());
 
@@ -211,9 +221,7 @@ int main(int /*argc*/, char ** /*argv*/) {
             std::cerr << "GetInstanceProcAddr: Unable to find pfnVkDestroyDebugUtilsMessengerEXT function." << std::endl;
             exit(1);
         }
-        vk::UniqueDebugUtilsMessengerEXT debugUtilsMessenger = instance->createDebugUtilsMessengerEXTUnique(
-            vk::DebugUtilsMessengerCreateInfoEXT({}, severityFlags, messageTypeFlags, debugUtilsMessengerCallback)
-        );
+        vk::UniqueDebugUtilsMessengerEXT debugUtilsMessenger = instance->createDebugUtilsMessengerEXTUnique(debugUtilsMessengerCreateInfoEXT);
 #endif
 
         // ---------------------------
