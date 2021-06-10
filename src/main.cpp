@@ -13,7 +13,7 @@
 #define DEBUG (!NDEBUG)
 
 constexpr const char *resultFile = "result.png";
-constexpr const char *kernelFile = "src/hello.spv";
+constexpr const char *kernelFile = "build/src/hello.comp.spv";
 constexpr const char *kernelName = "main";
 constexpr const int W = 3200;
 constexpr const int H = 2400;
@@ -345,36 +345,65 @@ int main(int /*argc*/, char ** /*argv*/) {
         // ---------------------------
         constexpr size_t bufferSize = W * H * sizeof(pixel_t);
         vk::BufferCreateInfo bufferCreateInfo({}, bufferSize, vk::BufferUsageFlagBits::eStorageBuffer, vk::SharingMode::eExclusive, queueFamilyIndex);
-        vk::UniqueBuffer buffer = device->createBufferUnique(bufferCreateInfo);
-        vk::MemoryRequirements memoryRequirements = device->getBufferMemoryRequirements(buffer.get());
-        auto f = [&](vk::Flags<vk::MemoryPropertyFlagBits> properties) {
+        std::vector<vk::Buffer> buffers = {
+            device->createBuffer(bufferCreateInfo),
+            device->createBuffer(bufferCreateInfo),
+            device->createBuffer(bufferCreateInfo),
+        };
+
+        i = 0;
+        size_t totalRequiredSize = 0;
+        uint32_t typeFilter = 0;
+        for (const vk::Buffer &buffer : buffers) {
+            vk::MemoryRequirements memoryRequirements = device->getBufferMemoryRequirements(buffer);
+            std::cout << "buffers[" << i << "]:" << std::endl;
+            std::cout << "memoryRequirements.size: " << memoryRequirements.size << std::endl;
+            std::cout << "memoryRequirements.alignment: " << memoryRequirements.alignment << std::endl;
+            std::cout << "memoryRequirements.memoryTypeBits: " << std::bitset<32>(memoryRequirements.memoryTypeBits) << std::dec << std::endl;
+
+            totalRequiredSize += memoryRequirements.size;
+            typeFilter |= memoryRequirements.memoryTypeBits;
+            ++i;
+        }
+
+        auto filter = [&](vk::Flags<vk::MemoryPropertyFlagBits> properties) {
             for (uint32_t i = 0; i < physicalDeviceMemoryProperties.memoryTypeCount; ++i) {
-                if ((memoryRequirements.memoryTypeBits & (1 << i)) &&
+                if ((typeFilter & (1 << i)) &&
                    ((physicalDeviceMemoryProperties.memoryTypes[i].propertyFlags & properties) == properties)) {
-                    std::cout << "select bit: " << i << std::endl;
+                    std::cout << "select bit" << i << std::endl;
                     return i;
                 }
             }
             return 0xffffffffU;
         };
-        vk::MemoryAllocateInfo memoryAllocateInfo(memoryRequirements.size, f(vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eHostVisible));
-        vk::UniqueDeviceMemory bufferMemory = device->allocateMemoryUnique(memoryAllocateInfo);
-        device->bindBufferMemory(buffer.get(), bufferMemory.get(), 0);
+        uint32_t memoryTypeIndex = filter(vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+        vk::MemoryAllocateInfo memoryAllocateInfo(totalRequiredSize, memoryTypeIndex);
+        vk::UniqueDeviceMemory buffersMemory = device->allocateMemoryUnique(memoryAllocateInfo);
 
-        std::cout << "bufferSize: " << bufferSize << std::endl;
-        std::cout << "memoryRequirements.size: " << memoryRequirements.size << std::endl;
-        std::cout << "memoryRequirements.alignment: " << memoryRequirements.alignment << std::endl;
-        std::cout << "memoryRequirements.memoryTypeBits: " << std::bitset<32>(memoryRequirements.memoryTypeBits) << std::dec << std::endl;
+        size_t offset = 0;
+        for (const vk::Buffer &buffer : buffers) {
+            vk::MemoryRequirements memoryRequirements = device->getBufferMemoryRequirements(buffer);
+            device->bindBufferMemory(buffer, buffersMemory.get(), offset);
+            offset += memoryRequirements.size;
+        }
+        assert(offset == totalRequiredSize);
+        std::cout << "total: " << totalRequiredSize << std::endl;
 
         // ---------------------------
         //  Descriptor Set
         // ---------------------------
-        // Layout
-        vk::DescriptorSetLayoutBinding descriptorSetLayoutBinding(0, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute);
-        vk::DescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo({}, descriptorSetLayoutBinding);
+        // Layouts
+        std::vector<vk::DescriptorSetLayoutBinding> descriptorSetLayoutBindings = {
+            {0, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute}, // src0
+            {1, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute}, // src1
+            {2, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute}, // dst
+        };
+        vk::DescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo({}, descriptorSetLayoutBindings);
         vk::UniqueDescriptorSetLayout descriptorSetLayout = device->createDescriptorSetLayoutUnique(descriptorSetLayoutCreateInfo);
+        vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo({}, descriptorSetLayout.get());
+        vk::UniquePipelineLayout pipelineLayout = device->createPipelineLayoutUnique(pipelineLayoutCreateInfo);
         // Pool
-        vk::DescriptorPoolSize descriptorPoolSize(vk::DescriptorType::eStorageBuffer, 1);
+        vk::DescriptorPoolSize descriptorPoolSize(vk::DescriptorType::eStorageBuffer, buffers.size());
         vk::DescriptorPoolCreateInfo descriptorPoolCreateInfo({}, 1, descriptorPoolSize);
         vk::UniqueDescriptorPool descriptorPool = device->createDescriptorPoolUnique(descriptorPoolCreateInfo);
         // Alloc
@@ -382,10 +411,18 @@ int main(int /*argc*/, char ** /*argv*/) {
         vk::UniqueDescriptorSet descriptorSet = std::move(
             device->allocateDescriptorSetsUnique(descriptorSetAllocateInfo).front()
         );
-        // bind
-        vk::DescriptorBufferInfo descriptorBufferInfo(buffer.get(), 0, bufferSize);
-        vk::WriteDescriptorSet writeDescriptorSet(descriptorSet.get(), 0, {}, vk::DescriptorType::eStorageBuffer, {}, descriptorBufferInfo, {});
-        device->updateDescriptorSets(writeDescriptorSet, {});
+        // bind buffers
+        std::vector<vk::DescriptorBufferInfo> descriptorBufferInfos = {
+            {buffers[0], 0, VK_WHOLE_SIZE},
+            {buffers[1], 0, VK_WHOLE_SIZE},
+            {buffers[2], 0, VK_WHOLE_SIZE},
+        };
+        std::vector<vk::WriteDescriptorSet> writeDescriptorSets = {
+            {descriptorSet.get(), 0, {}, vk::DescriptorType::eStorageBuffer, {}, descriptorBufferInfos[0], {}},
+            {descriptorSet.get(), 1, {}, vk::DescriptorType::eStorageBuffer, {}, descriptorBufferInfos[1], {}},
+            {descriptorSet.get(), 2, {}, vk::DescriptorType::eStorageBuffer, {}, descriptorBufferInfos[2], {}},
+        };
+        device->updateDescriptorSets(writeDescriptorSets, {});
 
         // ---------------------------
         //  Compute pipeline
@@ -406,8 +443,6 @@ int main(int /*argc*/, char ** /*argv*/) {
 
         // pipeline
         vk::PipelineShaderStageCreateInfo pipelineShaderStageCreateInfo({}, vk::ShaderStageFlagBits::eCompute, computeShaderModule.get(), kernelName);
-        vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo({}, descriptorSetLayout.get());
-        vk::UniquePipelineLayout pipelineLayout = device->createPipelineLayoutUnique(pipelineLayoutCreateInfo);
         vk::ComputePipelineCreateInfo computePipelineCreateInfo({}, pipelineShaderStageCreateInfo, pipelineLayout.get());
         vk::UniquePipeline computePipeline = device->createComputePipelineUnique({}, computePipelineCreateInfo);
 
@@ -415,7 +450,9 @@ int main(int /*argc*/, char ** /*argv*/) {
         // ---------------------------
         //  Command pool & Command buffer
         // ---------------------------
-        vk::CommandPoolCreateInfo commandPoolCreateInfo(vk::CommandPoolCreateFlagBits::eResetCommandBuffer, queueFamilyIndex);
+        // TODO: Which is better?
+        //vk::CommandPoolCreateInfo commandPoolCreateInfo(vk::CommandPoolCreateFlagBits::eResetCommandBuffer, queueFamilyIndex);
+        vk::CommandPoolCreateInfo commandPoolCreateInfo(vk::CommandPoolCreateFlagBits::eTransient, queueFamilyIndex);
         vk::UniqueCommandPool commandPool = device->createCommandPoolUnique(commandPoolCreateInfo);
         vk::CommandBufferAllocateInfo commandBufferAllocateInfo(commandPool.get(), vk::CommandBufferLevel::ePrimary, 1);
         vk::UniqueCommandBuffer commandBuffer = std::move(
@@ -433,6 +470,8 @@ int main(int /*argc*/, char ** /*argv*/) {
             commandBuffer->dispatch(W/WORKGROUP_SIZE, H/WORKGROUP_SIZE, 1);
         }
         commandBuffer->end();
+
+        // TODO: prepare src0 & src1
 
         vk::UniqueFence fence = device->createFenceUnique(vk::FenceCreateInfo());
         vk::SubmitInfo submitInfo({}, {}, commandBuffer.get());
@@ -462,18 +501,19 @@ int main(int /*argc*/, char ** /*argv*/) {
         // ---------------------------
         std::cout << "Save: ";
         {
-            pixel_t* mappedMemory = static_cast<pixel_t *>(device->mapMemory(bufferMemory.get(), 0, bufferSize));
+            pixel_t* mappedMemory = static_cast<pixel_t *>(device->mapMemory(buffersMemory.get(), 0, VK_WHOLE_SIZE));
 
+            size_t offset = W*H * 2; // dst exists after src0 + src1
             std::vector<uint8_t> image;
             image.reserve(W * H * 4);
             for (int i = 0; i < W*H; ++i) {
-                image.push_back(static_cast<uint8_t>(255.0f * mappedMemory[i].r + 0.5f));
-                image.push_back(static_cast<uint8_t>(255.0f * mappedMemory[i].g + 0.5f));
-                image.push_back(static_cast<uint8_t>(255.0f * mappedMemory[i].b + 0.5f));
-                image.push_back(static_cast<uint8_t>(255.0f * mappedMemory[i].a + 0.5f));
+                image.push_back(static_cast<uint8_t>(255.0f * mappedMemory[offset + i].r + 0.5f));
+                image.push_back(static_cast<uint8_t>(255.0f * mappedMemory[offset + i].g + 0.5f));
+                image.push_back(static_cast<uint8_t>(255.0f * mappedMemory[offset + i].b + 0.5f));
+                image.push_back(static_cast<uint8_t>(255.0f * mappedMemory[offset + i].a + 0.5f));
             }
 
-            device->unmapMemory(bufferMemory.get());
+            device->unmapMemory(buffersMemory.get());
             mappedMemory = nullptr;
 
             stbi_write_png(resultFile, W, H, 4, image.data(), W*4);

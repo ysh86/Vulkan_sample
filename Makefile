@@ -19,6 +19,10 @@ CXXFLAGS += -Wall -Werror --std=c++11 -O3
 # libs
 
 # Vulkan
+SHADER_SRCS := $(shell find -L $(SRC_DIRS) -name *.vert -or -name *.frag -or -name *.comp)
+SHADER_OBJS := $(SHADER_SRCS:%=$(BUILD_DIR)/%.spv)
+SHADER_VER := 450
+
 CPPFLAGS += -I$(HOME)/SDKs/Vulkan-Headers/include
 ifdef WSL_DISTRO_NAME
 	TARGET_EXEC := $(TARGET_EXEC).exe
@@ -51,6 +55,8 @@ CXXFLAGS += -Wno-error=sign-compare
 ###LDFLAGS += -no-pie -L$(HOME)/SDKs/ipp/lib -lippi -lipps -lippcc -lippcore
 
 
+all: $(BUILD_DIR)/$(TARGET_EXEC) $(SHADER_OBJS)
+
 $(BUILD_DIR)/$(TARGET_EXEC): $(OBJS)
 	$(CXX) $(OBJS) -o $@ $(LDFLAGS)
 
@@ -69,8 +75,12 @@ $(BUILD_DIR)/%.cpp.o: %.cpp
 	$(MKDIR_P) $(dir $@)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
 
+# Vulkan source
+$(SHADER_OBJS): $(SHADER_SRCS)
+	$(MKDIR_P) $(dir $@)
+	glslangValidator -o $@ -V$(SHADER_VER) $<
 
-.PHONY: clean
+.PHONY: all clean
 
 clean:
 	$(RM) -r $(BUILD_DIR)
