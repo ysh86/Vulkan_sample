@@ -4,6 +4,7 @@
 #include <iostream>
 #include <fstream>
 #include <bitset>
+#include <limits>
 
 #define STBIW_WINDOWS_UTF8
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -12,12 +13,14 @@
 #define NDEBUG 1
 #define DEBUG (!NDEBUG)
 
+constexpr const int GPU = 0;
 constexpr const char *resultFile = "result.png";
 constexpr const char *kernelFile = "build/src/hello.comp.spv";
 constexpr const char *kernelName = "main";
 constexpr const int W = 3200;
 constexpr const int H = 2400;
 constexpr const int WORKGROUP_SIZE = 32;
+constexpr const int NUM_OF_DISPATCH = 10;
 typedef struct {
     float r, g, b, a;
 } pixel_t;
@@ -265,6 +268,17 @@ int main(int /*argc*/, char ** /*argv*/) {
             std::cout << "deviceName: " << properties.deviceName << std::endl;
 
             std::cout << "pipelineCacheUUID: " << properties.pipelineCacheUUID << std::endl;
+
+            // Limits
+            // compute
+            std::cout << "maxComputeSharedMemorySize: " << properties.limits.maxComputeSharedMemorySize << std::endl;
+            std::cout << "maxComputeWorkGroupCount: " << properties.limits.maxComputeWorkGroupCount[0] << "," << properties.limits.maxComputeWorkGroupCount[1] << "," << properties.limits.maxComputeWorkGroupCount[2] << std::endl;
+            std::cout << "maxComputeWorkGroupInvocations: " << properties.limits.maxComputeWorkGroupInvocations << std::endl;
+            std::cout << "maxComputeWorkGroupSize: " << properties.limits.maxComputeWorkGroupSize[0] << "," << properties.limits.maxComputeWorkGroupSize[1] << "," << properties.limits.maxComputeWorkGroupSize[2] << std::endl;
+            // profiling
+            std::cout << "timestampComputeAndGraphics: " << properties.limits.timestampComputeAndGraphics << std::endl;
+            std::cout << "timestampPeriod: " << properties.limits.timestampPeriod << std::endl;
+
             std::cout << std::endl;
 
             // Features
@@ -274,12 +288,12 @@ int main(int /*argc*/, char ** /*argv*/) {
         }
 
         // select a GPU
-        if (i <= 0) {
+        if (i <= GPU) {
             std::cerr << "enumeratePhysicalDevices: PhysicalDevice is not found." << std::endl;
             exit(1);
         }
-        i = 0;
-        vk::PhysicalDevice &gpu = physicalDevices[i];
+        vk::PhysicalDevice &gpu = physicalDevices[GPU];
+        vk::PhysicalDeviceProperties properties = gpu.getProperties();
         // device extensions
         std::vector<vk::ExtensionProperties> deviceExtensionProperties = gpu.enumerateDeviceExtensionProperties();
         std::cout << "PhysicalDevice " << i << " : " << deviceExtensionProperties.size() << " extensions:" << std::endl;
@@ -318,23 +332,26 @@ int main(int /*argc*/, char ** /*argv*/) {
             std::cout << "queueFamilyProperties: [" << i << "]" << std::endl;
             std::cout << "count: " << qfp.queueCount << std::endl;
             std::cout << "flags: " << vk::to_string(qfp.queueFlags) << std::endl;
+            std::cout << "timestampValidBits: " << qfp.timestampValidBits << std::endl;
             std::cout << std::endl;
 
             ++i;
         }
         // select a queue
-        uint32_t queueFamilyIndex = 0;
-        if (i <= 0 || !(queueFamilyProperties[queueFamilyIndex].queueFlags & vk::QueueFlagBits::eCompute)) {
+        int queueFamilyIndex = 0;
+        if (i <= queueFamilyIndex || !(queueFamilyProperties[queueFamilyIndex].queueFlags & vk::QueueFlagBits::eCompute)) {
             std::cerr << "queueFamilyProperties: compute queue is not found." << std::endl;
             exit(1);
         }
         float queuePriority = 1.0f;
         vk::DeviceQueueCreateInfo deviceQueueCreateInfo({}, queueFamilyIndex, queuePriority);
         std::vector<char const *> enabledDeviceLayers;
-        std::vector<char const *> enabledDeviceExtensions; // TODO: request PerformanceQueryFeaturesKHR, HostQueryResetFeatures
+        std::vector<char const *> enabledDeviceExtensions;
         vk::PhysicalDeviceFeatures physicalDeviceFeatures = {};
-        vk::StructureChain<vk::DeviceCreateInfo> deviceCreateInfo(
+        vk::StructureChain<vk::DeviceCreateInfo/*, vk::PhysicalDeviceHostQueryResetFeatures*/> deviceCreateInfo(
             {{}, deviceQueueCreateInfo, enabledDeviceLayers, enabledDeviceExtensions, &physicalDeviceFeatures}
+            //{true},
+            // TODO: PerformanceQueryFeaturesKHR
         );
         vk::UniqueDevice device = gpu.createDeviceUnique(deviceCreateInfo.get<vk::DeviceCreateInfo>());
         //  queue
@@ -351,9 +368,9 @@ int main(int /*argc*/, char ** /*argv*/) {
             device->createBuffer(bufferCreateInfo),
         };
 
-        i = 0;
         size_t totalRequiredSize = 0;
         uint32_t typeFilter = 0;
+        i = 0;
         for (const vk::Buffer &buffer : buffers) {
             vk::MemoryRequirements memoryRequirements = device->getBufferMemoryRequirements(buffer);
             std::cout << "buffers[" << i << "]:" << std::endl;
@@ -460,15 +477,26 @@ int main(int /*argc*/, char ** /*argv*/) {
         );
 
         // ---------------------------
+        //  Queries
+        // ---------------------------
+        vk::QueryPoolCreateInfo queryPoolCreateInfo({}, vk::QueryType::eTimestamp, 2, {});
+        vk::UniqueQueryPool queryPool = device->createQueryPoolUnique(queryPoolCreateInfo);
+
+        // ---------------------------
         //  exec
         // ---------------------------
         vk::CommandBufferBeginInfo beginInfo(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
         commandBuffer->begin(beginInfo);
+        commandBuffer->resetQueryPool(queryPool.get(), 0, 2);
+        commandBuffer->writeTimestamp(vk::PipelineStageFlagBits::eTopOfPipe, queryPool.get(), 0);
         {
             commandBuffer->bindPipeline(vk::PipelineBindPoint::eCompute, computePipeline.get());
             commandBuffer->bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipelineLayout.get(), 0, 1, &(descriptorSet.get()), 0, nullptr);
-            commandBuffer->dispatch(W/WORKGROUP_SIZE, H/WORKGROUP_SIZE, 1);
+            for (int i = 0; i < NUM_OF_DISPATCH; ++i) {
+                commandBuffer->dispatch(W/WORKGROUP_SIZE, H/WORKGROUP_SIZE, 1);
+            }
         }
+        commandBuffer->writeTimestamp(vk::PipelineStageFlagBits::eBottomOfPipe, queryPool.get(), 1);
         commandBuffer->end();
 
         // TODO: prepare src0 & src1
@@ -495,10 +523,27 @@ int main(int /*argc*/, char ** /*argv*/) {
         }
 
         std::cout << "done" << std::endl;
+        std::cout << std::endl;
 
         // ---------------------------
         //  save results
         // ---------------------------
+        uint64_t timestamps[2];
+        result = device->getQueryPoolResults(queryPool.get(), 0, 2, sizeof(uint64_t) * 2, timestamps, sizeof(uint64_t), vk::QueryResultFlagBits::e64);
+        if (result != vk::Result::eSuccess) {
+            throw std::runtime_error("Failed to receive query results!");
+        }
+        double elapsed_ms;
+        if (timestamps[1] > timestamps[0]) {
+            elapsed_ms = (timestamps[1] - timestamps[0]) / 1000000.0 * properties.limits.timestampPeriod;
+        } else {
+            elapsed_ms = (timestamps[1] - timestamps[0] + std::numeric_limits<uint64_t>::max()) / 1000000.0 * properties.limits.timestampPeriod;
+        }
+        //std::cout << "begin: " << timestamps[0] * properties.limits.timestampPeriod << std::endl;
+        //std::cout << "end:   " << timestamps[1] * properties.limits.timestampPeriod << std::endl;
+        std::cout << "elapsed time [ms]: " << elapsed_ms << std::endl;
+        std::cout << "bandwidth [GB/s]: " << totalRequiredSize * (1000.0 / elapsed_ms) / 1024 / 1024 / 1024 * NUM_OF_DISPATCH << std::endl;
+#if 0
         std::cout << "Save: ";
         {
             pixel_t* mappedMemory = static_cast<pixel_t *>(device->mapMemory(buffersMemory.get(), 0, VK_WHOLE_SIZE));
@@ -519,6 +564,7 @@ int main(int /*argc*/, char ** /*argv*/) {
             stbi_write_png(resultFile, W, H, 4, image.data(), W*4);
         }
         std::cout << "done" << std::endl;
+#endif
 
         // work group size
         // shared data size
