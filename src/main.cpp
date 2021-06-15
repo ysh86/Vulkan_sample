@@ -78,7 +78,7 @@ debugUtilsMessengerCallback(
 int main(int /*argc*/, char ** /*argv*/) {
     try {
         constexpr char const *appName          = "HelloVK";
-        constexpr uint32_t const appVersion    = VK_MAKE_VERSION(0, 0, 1);
+        constexpr uint32_t const appVersion    = VK_MAKE_VERSION(0, 0, 2);
         constexpr char const *engineName       = "Vulkan.hpp";
         constexpr uint32_t const engineVersion = VK_HEADER_VERSION_COMPLETE;
         constexpr uint32_t const apiVersion    = VK_API_VERSION_1_1;
@@ -367,6 +367,11 @@ int main(int /*argc*/, char ** /*argv*/) {
             device->createBuffer(bufferCreateInfo),
             device->createBuffer(bufferCreateInfo),
         };
+        std::vector<vk::Buffer> devBuffers = {
+            device->createBuffer(bufferCreateInfo),
+            device->createBuffer(bufferCreateInfo),
+            device->createBuffer(bufferCreateInfo),
+        };
 
         size_t totalRequiredSize = 0;
         uint32_t typeFilter = 0;
@@ -382,8 +387,23 @@ int main(int /*argc*/, char ** /*argv*/) {
             typeFilter |= memoryRequirements.memoryTypeBits;
             ++i;
         }
+        size_t devTotalRequiredSize = 0;
+        uint32_t devTypeFilter = 0;
+        i = 0;
+        for (const vk::Buffer &buffer : devBuffers) {
+            vk::MemoryRequirements memoryRequirements = device->getBufferMemoryRequirements(buffer);
+            std::cout << "devBuffers[" << i << "]:" << std::endl;
+            std::cout << "memoryRequirements.size: " << memoryRequirements.size << std::endl;
+            std::cout << "memoryRequirements.alignment: " << memoryRequirements.alignment << std::endl;
+            std::cout << "memoryRequirements.memoryTypeBits: " << std::bitset<32>(memoryRequirements.memoryTypeBits) << std::dec << std::endl;
 
-        auto filter = [&](vk::Flags<vk::MemoryPropertyFlagBits> properties) {
+            devTotalRequiredSize += memoryRequirements.size;
+            devTypeFilter |= memoryRequirements.memoryTypeBits;
+            ++i;
+        }
+        std::cout << std::endl;
+
+        auto filter = [&](uint32_t typeFilter, vk::Flags<vk::MemoryPropertyFlagBits> properties) {
             for (uint32_t i = 0; i < physicalDeviceMemoryProperties.memoryTypeCount; ++i) {
                 if ((typeFilter & (1 << i)) &&
                    ((physicalDeviceMemoryProperties.memoryTypes[i].propertyFlags & properties) == properties)) {
@@ -393,7 +413,8 @@ int main(int /*argc*/, char ** /*argv*/) {
             }
             return 0xffffffffU;
         };
-        uint32_t memoryTypeIndex = filter(vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+
+        uint32_t memoryTypeIndex = filter(typeFilter, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
         vk::MemoryAllocateInfo memoryAllocateInfo(totalRequiredSize, memoryTypeIndex);
         vk::UniqueDeviceMemory buffersMemory = device->allocateMemoryUnique(memoryAllocateInfo);
 
@@ -406,10 +427,23 @@ int main(int /*argc*/, char ** /*argv*/) {
         assert(offset == totalRequiredSize);
         std::cout << "total: " << totalRequiredSize << std::endl;
 
-        // ---------------------------
-        //  Descriptor Set
+        uint32_t devMemoryTypeIndex = filter(devTypeFilter, vk::MemoryPropertyFlagBits::eDeviceLocal);
+        vk::MemoryAllocateInfo devMemoryAllocateInfo(devTotalRequiredSize, devMemoryTypeIndex);
+        vk::UniqueDeviceMemory devBuffersMemory = device->allocateMemoryUnique(devMemoryAllocateInfo);
+
+        offset = 0;
+        for (const vk::Buffer &buffer : devBuffers) {
+            vk::MemoryRequirements memoryRequirements = device->getBufferMemoryRequirements(buffer);
+            device->bindBufferMemory(buffer, devBuffersMemory.get(), offset);
+            offset += memoryRequirements.size;
+        }
+        assert(offset == devTotalRequiredSize);
+        std::cout << "total: " << devTotalRequiredSize << std::endl;
+        std::cout << std::endl;
+
         // ---------------------------
         // Layouts
+        // ---------------------------
         std::vector<vk::DescriptorSetLayoutBinding> descriptorSetLayoutBindings = {
             {0, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute}, // src0
             {1, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute}, // src1
@@ -417,15 +451,24 @@ int main(int /*argc*/, char ** /*argv*/) {
         };
         vk::DescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo({}, descriptorSetLayoutBindings);
         vk::UniqueDescriptorSetLayout descriptorSetLayout = device->createDescriptorSetLayoutUnique(descriptorSetLayoutCreateInfo);
-        vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo({}, descriptorSetLayout.get());
-        vk::UniquePipelineLayout pipelineLayout = device->createPipelineLayoutUnique(pipelineLayoutCreateInfo);
+
+        // ---------------------------
+        //  Descriptor Sets
+        // ---------------------------
+        uint32_t maxSets = 2;
         // Pool
-        vk::DescriptorPoolSize descriptorPoolSize(vk::DescriptorType::eStorageBuffer, buffers.size());
-        vk::DescriptorPoolCreateInfo descriptorPoolCreateInfo({}, 1, descriptorPoolSize);
+        std::vector<vk::DescriptorPoolSize> descriptorPoolSizes = {
+            {vk::DescriptorType::eStorageBuffer, static_cast<uint32_t>(descriptorSetLayoutBindings.size())},
+            {vk::DescriptorType::eStorageBuffer, static_cast<uint32_t>(descriptorSetLayoutBindings.size())},
+        };
+        vk::DescriptorPoolCreateInfo descriptorPoolCreateInfo({}, maxSets, descriptorPoolSizes);
         vk::UniqueDescriptorPool descriptorPool = device->createDescriptorPoolUnique(descriptorPoolCreateInfo);
         // Alloc
         vk::DescriptorSetAllocateInfo descriptorSetAllocateInfo(descriptorPool.get(), descriptorSetLayout.get());
         vk::UniqueDescriptorSet descriptorSet = std::move(
+            device->allocateDescriptorSetsUnique(descriptorSetAllocateInfo).front()
+        );
+        vk::UniqueDescriptorSet devDescriptorSet = std::move(
             device->allocateDescriptorSetsUnique(descriptorSetAllocateInfo).front()
         );
         // bind buffers
@@ -434,10 +477,18 @@ int main(int /*argc*/, char ** /*argv*/) {
             {buffers[1], 0, VK_WHOLE_SIZE},
             {buffers[2], 0, VK_WHOLE_SIZE},
         };
+        std::vector<vk::DescriptorBufferInfo> devDescriptorBufferInfos = {
+            {devBuffers[0], 0, VK_WHOLE_SIZE},
+            {devBuffers[1], 0, VK_WHOLE_SIZE},
+            {devBuffers[2], 0, VK_WHOLE_SIZE},
+        };
         std::vector<vk::WriteDescriptorSet> writeDescriptorSets = {
-            {descriptorSet.get(), 0, {}, vk::DescriptorType::eStorageBuffer, {}, descriptorBufferInfos[0], {}},
-            {descriptorSet.get(), 1, {}, vk::DescriptorType::eStorageBuffer, {}, descriptorBufferInfos[1], {}},
-            {descriptorSet.get(), 2, {}, vk::DescriptorType::eStorageBuffer, {}, descriptorBufferInfos[2], {}},
+            {descriptorSet.get(),    0, {}, vk::DescriptorType::eStorageBuffer, {}, descriptorBufferInfos[0], {}},
+            {descriptorSet.get(),    1, {}, vk::DescriptorType::eStorageBuffer, {}, descriptorBufferInfos[1], {}},
+            {descriptorSet.get(),    2, {}, vk::DescriptorType::eStorageBuffer, {}, descriptorBufferInfos[2], {}},
+            {devDescriptorSet.get(), 0, {}, vk::DescriptorType::eStorageBuffer, {}, devDescriptorBufferInfos[0], {}},
+            {devDescriptorSet.get(), 1, {}, vk::DescriptorType::eStorageBuffer, {}, devDescriptorBufferInfos[1], {}},
+            {devDescriptorSet.get(), 2, {}, vk::DescriptorType::eStorageBuffer, {}, devDescriptorBufferInfos[2], {}},
         };
         device->updateDescriptorSets(writeDescriptorSets, {});
 
@@ -457,6 +508,10 @@ int main(int /*argc*/, char ** /*argv*/) {
         uint32_t *pCode = reinterpret_cast<uint32_t *>(kernelSpv.data());
         vk::ShaderModuleCreateInfo shaderModuleCreateInfo({}, codeSize, pCode);
         vk::UniqueShaderModule computeShaderModule = device->createShaderModuleUnique(shaderModuleCreateInfo);
+
+        // layout
+        vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo({}, descriptorSetLayout.get());
+        vk::UniquePipelineLayout pipelineLayout = device->createPipelineLayoutUnique(pipelineLayoutCreateInfo);
 
         // pipeline
         vk::PipelineShaderStageCreateInfo pipelineShaderStageCreateInfo({}, vk::ShaderStageFlagBits::eCompute, computeShaderModule.get(), kernelName);
@@ -479,7 +534,7 @@ int main(int /*argc*/, char ** /*argv*/) {
         // ---------------------------
         //  Queries
         // ---------------------------
-        vk::QueryPoolCreateInfo queryPoolCreateInfo({}, vk::QueryType::eTimestamp, 2, {});
+        vk::QueryPoolCreateInfo queryPoolCreateInfo({}, vk::QueryType::eTimestamp, 4, {});
         vk::UniqueQueryPool queryPool = device->createQueryPoolUnique(queryPoolCreateInfo);
 
         // ---------------------------
@@ -487,16 +542,37 @@ int main(int /*argc*/, char ** /*argv*/) {
         // ---------------------------
         vk::CommandBufferBeginInfo beginInfo(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
         commandBuffer->begin(beginInfo);
-        commandBuffer->resetQueryPool(queryPool.get(), 0, 2);
-        commandBuffer->writeTimestamp(vk::PipelineStageFlagBits::eTopOfPipe, queryPool.get(), 0);
+        uint32_t query;
+        query = 0;
         {
-            commandBuffer->bindPipeline(vk::PipelineBindPoint::eCompute, computePipeline.get());
-            commandBuffer->bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipelineLayout.get(), 0, 1, &(descriptorSet.get()), 0, nullptr);
-            for (int i = 0; i < NUM_OF_DISPATCH; ++i) {
-                commandBuffer->dispatch(W/WORKGROUP_SIZE, H/WORKGROUP_SIZE, 1);
+            //commandBuffer->begin(beginInfo);
+            commandBuffer->resetQueryPool(queryPool.get(), query * 2, query * 2 + 2);
+            commandBuffer->writeTimestamp(vk::PipelineStageFlagBits::eTopOfPipe, queryPool.get(), query * 2);
+            {
+                commandBuffer->bindPipeline(vk::PipelineBindPoint::eCompute, computePipeline.get());
+                commandBuffer->bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipelineLayout.get(), 0, 1, &(descriptorSet.get()), 0, nullptr);
+                for (int i = 0; i < NUM_OF_DISPATCH; ++i) {
+                    commandBuffer->dispatch(W/WORKGROUP_SIZE, H/WORKGROUP_SIZE, 1);
+                }
             }
+            commandBuffer->writeTimestamp(vk::PipelineStageFlagBits::eBottomOfPipe, queryPool.get(), query * 2 + 1);
+            //commandBuffer->end();
         }
-        commandBuffer->writeTimestamp(vk::PipelineStageFlagBits::eBottomOfPipe, queryPool.get(), 1);
+        query = 1;
+        {
+            //commandBuffer->begin(beginInfo);
+            commandBuffer->resetQueryPool(queryPool.get(), query * 2, query * 2 + 2);
+            commandBuffer->writeTimestamp(vk::PipelineStageFlagBits::eTopOfPipe, queryPool.get(), query * 2);
+            {
+                commandBuffer->bindPipeline(vk::PipelineBindPoint::eCompute, computePipeline.get());
+                commandBuffer->bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipelineLayout.get(), 0, 1, &(devDescriptorSet.get()), 0, nullptr);
+                for (int i = 0; i < NUM_OF_DISPATCH; ++i) {
+                    commandBuffer->dispatch(W/WORKGROUP_SIZE, H/WORKGROUP_SIZE, 1);
+                }
+            }
+            commandBuffer->writeTimestamp(vk::PipelineStageFlagBits::eBottomOfPipe, queryPool.get(), query * 2 + 1);
+            //commandBuffer->end();
+        }
         commandBuffer->end();
 
         // TODO: prepare src0 & src1
@@ -528,21 +604,43 @@ int main(int /*argc*/, char ** /*argv*/) {
         // ---------------------------
         //  save results
         // ---------------------------
-        uint64_t timestamps[2];
-        result = device->getQueryPoolResults(queryPool.get(), 0, 2, sizeof(uint64_t) * 2, timestamps, sizeof(uint64_t), vk::QueryResultFlagBits::e64);
+        uint64_t timestamps[4];
+        result = device->getQueryPoolResults(queryPool.get(), 0, 4, sizeof(uint64_t) * 4, timestamps, sizeof(uint64_t), vk::QueryResultFlagBits::e64);
         if (result != vk::Result::eSuccess) {
-            throw std::runtime_error("Failed to receive query results!");
-        }
-        double elapsed_ms;
-        if (timestamps[1] > timestamps[0]) {
-            elapsed_ms = (timestamps[1] - timestamps[0]) / 1000000.0 * properties.limits.timestampPeriod;
-        } else {
-            elapsed_ms = (timestamps[1] - timestamps[0] + std::numeric_limits<uint64_t>::max()) / 1000000.0 * properties.limits.timestampPeriod;
+            throw std::runtime_error(vk::to_string(result));
         }
         //std::cout << "begin: " << timestamps[0] * properties.limits.timestampPeriod << std::endl;
         //std::cout << "end:   " << timestamps[1] * properties.limits.timestampPeriod << std::endl;
-        std::cout << "elapsed time [ms]: " << elapsed_ms << std::endl;
-        std::cout << "bandwidth [GB/s]: " << totalRequiredSize * (1000.0 / elapsed_ms) / 1024 / 1024 / 1024 * NUM_OF_DISPATCH << std::endl;
+        //std::cout << "begin: " << timestamps[2] * properties.limits.timestampPeriod << std::endl;
+        //std::cout << "end:   " << timestamps[3] * properties.limits.timestampPeriod << std::endl;
+        query = 0;
+        {
+            uint64_t t0 = timestamps[query * 2];
+            uint64_t t1 = timestamps[query * 2 + 1];
+            double elapsed_ms;
+            if (t1 > t0) {
+                elapsed_ms = (t1 - t0) / 1000000.0 * properties.limits.timestampPeriod;
+            } else {
+                elapsed_ms = (t1 - t0 + std::numeric_limits<uint64_t>::max()) / 1000000.0 * properties.limits.timestampPeriod;
+            }
+            std::cout << "elapsed time [ms]: " << elapsed_ms << std::endl;
+            std::cout << "pinned bandwidth [GB/s]: " << totalRequiredSize * (1000.0 / elapsed_ms) / 1024 / 1024 / 1024 * NUM_OF_DISPATCH << std::endl;
+            std::cout << std::endl;
+        }
+        query = 1;
+        {
+            uint64_t t0 = timestamps[query * 2];
+            uint64_t t1 = timestamps[query * 2 + 1];
+            double elapsed_ms;
+            if (t1 > t0) {
+                elapsed_ms = (t1 - t0) / 1000000.0 * properties.limits.timestampPeriod;
+            } else {
+                elapsed_ms = (t1 - t0 + std::numeric_limits<uint64_t>::max()) / 1000000.0 * properties.limits.timestampPeriod;
+            }
+            std::cout << "elapsed time [ms]: " << elapsed_ms << std::endl;
+            std::cout << "dev bandwidth [GB/s]: " << totalRequiredSize * (1000.0 / elapsed_ms) / 1024 / 1024 / 1024 * NUM_OF_DISPATCH << std::endl;
+            std::cout << std::endl;
+        }
 #if 0
         std::cout << "Save: ";
         {
@@ -580,6 +678,6 @@ int main(int /*argc*/, char ** /*argv*/) {
         exit(-1);
     }
 
-    std::cout << std::endl << "done" << std::endl;
+    std::cout << "done" << std::endl;
     return 0;
 }
