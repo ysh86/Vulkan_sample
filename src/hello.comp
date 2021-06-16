@@ -12,9 +12,15 @@ layout(std430, set=0, binding=1) buffer src1 { uint b[]; };
 layout(std430, set=0, binding=2) buffer dst  { uint c[]; };
 
 
+#define MAD_4(x, y)     x = fma(y, x, y);   y = fma(x, y, x);   x = fma(y, x, y);   y = fma(x, y, x);
+#define MAD_16(x, y)    MAD_4(x, y);        MAD_4(x, y);        MAD_4(x, y);        MAD_4(x, y);
+#define MAD_64(x, y)    MAD_16(x, y);       MAD_16(x, y);       MAD_16(x, y);       MAD_16(x, y);
+
+
 void main() {
     const uint gid = gl_GlobalInvocationID.x;
 
+#if 0
     uint temp_a = a[gid];
     uint temp_b = b[gid];
 
@@ -25,4 +31,28 @@ void main() {
     temp_c |= ((temp_a & 0xFF000000) + (temp_b & 0xFF000000)) & 0xFF000000;
 
     c[gid] = temp_c;
+#else
+    vec4 temp_a = {gl_LocalInvocationID.x, gl_LocalInvocationID.x+1, gl_LocalInvocationID.x+2, gl_LocalInvocationID.x+3};
+    vec4 temp_0 = {gid, gid+1, gid+2, gid+3};
+
+    MAD_64(temp_a, temp_0);
+    MAD_64(temp_a, temp_0);
+    MAD_64(temp_a, temp_0);
+    MAD_64(temp_a, temp_0);
+    MAD_64(temp_a, temp_0);
+    MAD_64(temp_a, temp_0);
+    MAD_64(temp_a, temp_0);
+    MAD_64(temp_a, temp_0);
+    MAD_64(temp_a, temp_0);
+    MAD_64(temp_a, temp_0);
+    MAD_64(temp_a, temp_0);
+    MAD_64(temp_a, temp_0);
+    MAD_64(temp_a, temp_0);
+    MAD_64(temp_a, temp_0);
+    MAD_64(temp_a, temp_0);
+    MAD_64(temp_a, temp_0);
+
+    float temp_c = temp_0.x + temp_0.y + temp_0.z + temp_0.w + temp_a.x + temp_a.y + temp_a.z + temp_a.w;
+    c[gid] = uint(temp_c);
+#endif
 }

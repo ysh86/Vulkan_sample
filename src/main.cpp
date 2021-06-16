@@ -14,7 +14,8 @@
 #define DEBUG (!NDEBUG)
 
 constexpr const int GPU = 0;
-constexpr const int NUM_OF_DISPATCH = 256;
+//constexpr const int NUM_OF_DISPATCH = 256;
+constexpr const int NUM_OF_DISPATCH = 16;
 
 typedef struct {
     uint32_t r;//, g, b, a;
@@ -628,6 +629,7 @@ int main(int /*argc*/, char ** /*argv*/) {
             }
             std::cout << "elapsed time [ms]: " << elapsed_ms << std::endl;
             std::cout << "pinned bandwidth [GB/s]: " << totalRequiredSize * (1000.0 / elapsed_ms) / 1024 / 1024 / 1024 * NUM_OF_DISPATCH << std::endl;
+            std::cout << "pinned fma [GFLOPS]: " << (1000.0 / elapsed_ms) * 4/*vec4*/ * 2/*fma*/ * (64*16)/*num*/ * W*H * NUM_OF_DISPATCH / 1000 / 1000 / 1000 << std::endl;
             std::cout << std::endl;
         }
         query = 1;
@@ -642,6 +644,7 @@ int main(int /*argc*/, char ** /*argv*/) {
             }
             std::cout << "elapsed time [ms]: " << elapsed_ms << std::endl;
             std::cout << "dev bandwidth [GB/s]: " << totalRequiredSize * (1000.0 / elapsed_ms) / 1024 / 1024 / 1024 * NUM_OF_DISPATCH << std::endl;
+            std::cout << "dev fma [GFLOPS]: " << (1000.0 / elapsed_ms) * 4/*vec4*/ * 2/*fma*/ * (64*16)/*num*/ * W*H * NUM_OF_DISPATCH / 1000 / 1000 / 1000 << std::endl;
             std::cout << std::endl;
         }
 #if 0
