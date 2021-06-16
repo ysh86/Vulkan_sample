@@ -14,16 +14,19 @@
 #define DEBUG (!NDEBUG)
 
 constexpr const int GPU = 0;
-constexpr const char *resultFile = "result.png";
+constexpr const int NUM_OF_DISPATCH = 256;
+
+typedef struct {
+    uint32_t r;//, g, b, a;
+} pixel_t;
+constexpr const int W = 1024;
+constexpr const int H = 1024 * 2;
+constexpr const int WORKGROUP_SIZE = 256;
+
 constexpr const char *kernelFile = "build/src/hello.comp.spv";
 constexpr const char *kernelName = "main";
-constexpr const int W = 3200;
-constexpr const int H = 2400;
-constexpr const int WORKGROUP_SIZE = 32;
-constexpr const int NUM_OF_DISPATCH = 10;
-typedef struct {
-    float r, g, b, a;
-} pixel_t;
+constexpr const char *resultFile = "result.png";
+
 
 std::ostream& operator<<(std::ostream &os, vk::ArrayWrapper1D<uint8_t, VK_UUID_SIZE> const &uuid) {
     uint8_t const *data = uuid.data();
@@ -552,7 +555,7 @@ int main(int /*argc*/, char ** /*argv*/) {
                 commandBuffer->bindPipeline(vk::PipelineBindPoint::eCompute, computePipeline.get());
                 commandBuffer->bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipelineLayout.get(), 0, 1, &(descriptorSet.get()), 0, nullptr);
                 for (int i = 0; i < NUM_OF_DISPATCH; ++i) {
-                    commandBuffer->dispatch(W/WORKGROUP_SIZE, H/WORKGROUP_SIZE, 1);
+                    commandBuffer->dispatch(W*H/WORKGROUP_SIZE, 1, 1);
                 }
             }
             commandBuffer->writeTimestamp(vk::PipelineStageFlagBits::eBottomOfPipe, queryPool.get(), query * 2 + 1);
@@ -567,7 +570,7 @@ int main(int /*argc*/, char ** /*argv*/) {
                 commandBuffer->bindPipeline(vk::PipelineBindPoint::eCompute, computePipeline.get());
                 commandBuffer->bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipelineLayout.get(), 0, 1, &(devDescriptorSet.get()), 0, nullptr);
                 for (int i = 0; i < NUM_OF_DISPATCH; ++i) {
-                    commandBuffer->dispatch(W/WORKGROUP_SIZE, H/WORKGROUP_SIZE, 1);
+                    commandBuffer->dispatch(W*H/WORKGROUP_SIZE, 1, 1);
                 }
             }
             commandBuffer->writeTimestamp(vk::PipelineStageFlagBits::eBottomOfPipe, queryPool.get(), query * 2 + 1);

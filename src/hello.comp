@@ -1,25 +1,28 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
 
-#define WIDTH 3200
-#define HEIGHT 2400
-#define WORKGROUP_SIZE 32
+#define WIDTH 1024
+#define HEIGHT (1024*2)
+#define WORKGROUP_SIZE 256
 
-layout (local_size_x = WORKGROUP_SIZE, local_size_y = WORKGROUP_SIZE, local_size_z = 1 ) in;
+layout (local_size_x = WORKGROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
 
-layout(std430, set=0, binding=0) buffer src0 { vec4 a[]; };
-layout(std430, set=0, binding=1) buffer src1 { vec4 b[]; };
-layout(std430, set=0, binding=2) buffer dst  { vec4 c[]; };
+layout(std430, set=0, binding=0) buffer src0 { uint a[]; };
+layout(std430, set=0, binding=1) buffer src1 { uint b[]; };
+layout(std430, set=0, binding=2) buffer dst  { uint c[]; };
 
 
 void main() {
-    const uint gid = gl_GlobalInvocationID.y * WIDTH + gl_GlobalInvocationID.x;
+    const uint gid = gl_GlobalInvocationID.x;
 
-    vec4 temp_a = a[gid];
-    vec4 temp_b = b[gid];
+    uint temp_a = a[gid];
+    uint temp_b = b[gid];
 
-    vec4 temp_c;
-    temp_c = temp_a * temp_b + 0.5f;
+    uint temp_c;
+    temp_c  = ((temp_a & 0x000000FF) + (temp_b & 0x000000FF)) & 0x000000FF;
+    temp_c |= ((temp_a & 0x0000FF00) + (temp_b & 0x0000FF00)) & 0x0000FF00;
+    temp_c |= ((temp_a & 0x00FF0000) + (temp_b & 0x00FF0000)) & 0x00FF0000;
+    temp_c |= ((temp_a & 0xFF000000) + (temp_b & 0xFF000000)) & 0xFF000000;
 
-    c[gid] = clamp(temp_c, 0.0f, 1.0f);
+    c[gid] = temp_c;
 }
