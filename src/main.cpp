@@ -13,7 +13,7 @@
 #define NDEBUG 1
 #define DEBUG (!NDEBUG)
 
-constexpr const int GPU = 0;
+constexpr const uint32_t GPU = 0;
 //constexpr const int NUM_OF_DISPATCH = 256;
 constexpr const int NUM_OF_DISPATCH = 16;
 
@@ -26,7 +26,7 @@ constexpr const int WORKGROUP_SIZE = 256;
 
 constexpr const char *kernelFile = "build/src/hello.comp.spv";
 constexpr const char *kernelName = "main";
-constexpr const char *resultFile = "result.png";
+//constexpr const char *resultFile = "result.png"; // for debug
 
 
 std::ostream& operator<<(std::ostream &os, vk::ArrayWrapper1D<uint8_t, VK_UUID_SIZE> const &uuid) {
@@ -236,7 +236,7 @@ int main(int /*argc*/, char ** /*argv*/) {
         // ---------------------------
         std::vector<vk::PhysicalDevice> physicalDevices = instance->enumeratePhysicalDevices();
 
-        int i = 0;
+        uint32_t i = 0;
         for (auto const &physicalDevice : physicalDevices) {
             vk::PhysicalDeviceProperties properties = physicalDevice.getProperties();
 
@@ -275,10 +275,16 @@ int main(int /*argc*/, char ** /*argv*/) {
 
             // Limits
             // compute
+            uint32_t maxComputeWorkGroupCount_x = properties.limits.maxComputeWorkGroupCount.at(0);
+            uint32_t maxComputeWorkGroupCount_y = properties.limits.maxComputeWorkGroupCount.at(1);
+            uint32_t maxComputeWorkGroupCount_z = properties.limits.maxComputeWorkGroupCount.at(2);
+            uint32_t maxComputeWorkGroupSize_x = properties.limits.maxComputeWorkGroupSize.at(0);
+            uint32_t maxComputeWorkGroupSize_y = properties.limits.maxComputeWorkGroupSize.at(1);
+            uint32_t maxComputeWorkGroupSize_z = properties.limits.maxComputeWorkGroupSize.at(2);
             std::cout << "maxComputeSharedMemorySize: " << properties.limits.maxComputeSharedMemorySize << std::endl;
-            std::cout << "maxComputeWorkGroupCount: " << properties.limits.maxComputeWorkGroupCount[0] << "," << properties.limits.maxComputeWorkGroupCount[1] << "," << properties.limits.maxComputeWorkGroupCount[2] << std::endl;
+            std::cout << "maxComputeWorkGroupCount: " << maxComputeWorkGroupCount_x << "," << maxComputeWorkGroupCount_y << "," << maxComputeWorkGroupCount_z << std::endl;
             std::cout << "maxComputeWorkGroupInvocations: " << properties.limits.maxComputeWorkGroupInvocations << std::endl;
-            std::cout << "maxComputeWorkGroupSize: " << properties.limits.maxComputeWorkGroupSize[0] << "," << properties.limits.maxComputeWorkGroupSize[1] << "," << properties.limits.maxComputeWorkGroupSize[2] << std::endl;
+            std::cout << "maxComputeWorkGroupSize: " << maxComputeWorkGroupSize_x << "," << maxComputeWorkGroupSize_y << "," << maxComputeWorkGroupSize_z << std::endl;
             // profiling
             std::cout << "timestampComputeAndGraphics: " << properties.limits.timestampComputeAndGraphics << std::endl;
             std::cout << "timestampPeriod: " << properties.limits.timestampPeriod << std::endl;
@@ -342,18 +348,20 @@ int main(int /*argc*/, char ** /*argv*/) {
             ++i;
         }
         // select a queue
-        int queueFamilyIndex = 0;
+        uint32_t queueFamilyIndex = 0;
         if (i <= queueFamilyIndex || !(queueFamilyProperties[queueFamilyIndex].queueFlags & vk::QueueFlagBits::eCompute)) {
             std::cerr << "queueFamilyProperties: compute queue is not found." << std::endl;
             exit(1);
         }
         float queuePriority = 1.0f;
-        vk::DeviceQueueCreateInfo deviceQueueCreateInfo({}, queueFamilyIndex, queuePriority);
+        std::vector<vk::DeviceQueueCreateInfo> deviceQueueCreateInfos = {
+            {{}, queueFamilyIndex, 1, &queuePriority}
+        };
         std::vector<char const *> enabledDeviceLayers;
         std::vector<char const *> enabledDeviceExtensions;
         vk::PhysicalDeviceFeatures physicalDeviceFeatures = {};
         vk::StructureChain<vk::DeviceCreateInfo/*, vk::PhysicalDeviceHostQueryResetFeatures*/> deviceCreateInfo(
-            {{}, deviceQueueCreateInfo, enabledDeviceLayers, enabledDeviceExtensions, &physicalDeviceFeatures}
+            {{}, deviceQueueCreateInfos, enabledDeviceLayers, enabledDeviceExtensions, &physicalDeviceFeatures}
             //{true},
             // TODO: PerformanceQueryFeaturesKHR
         );
@@ -365,7 +373,7 @@ int main(int /*argc*/, char ** /*argv*/) {
         //  Buffers
         // ---------------------------
         constexpr size_t bufferSize = W * H * sizeof(pixel_t);
-        vk::BufferCreateInfo bufferCreateInfo({}, bufferSize, vk::BufferUsageFlagBits::eStorageBuffer, vk::SharingMode::eExclusive, queueFamilyIndex);
+        vk::BufferCreateInfo bufferCreateInfo({}, bufferSize, vk::BufferUsageFlagBits::eStorageBuffer, vk::SharingMode::eExclusive, 1, &queueFamilyIndex);
         std::vector<vk::Buffer> buffers = {
             device->createBuffer(bufferCreateInfo),
             device->createBuffer(bufferCreateInfo),
@@ -647,6 +655,7 @@ int main(int /*argc*/, char ** /*argv*/) {
             std::cout << "dev fma [GFLOPS]: " << (1000.0 / elapsed_ms) * 4/*vec4*/ * 2/*fma*/ * (64*16)/*num*/ * W*H * NUM_OF_DISPATCH / 1000 / 1000 / 1000 << std::endl;
             std::cout << std::endl;
         }
+        // for debug
 #if 0
         std::cout << "Save: ";
         {
