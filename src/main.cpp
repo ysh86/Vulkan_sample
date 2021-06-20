@@ -306,7 +306,7 @@ int main(int /*argc*/, char ** /*argv*/) {
         vk::PhysicalDeviceProperties properties = gpu.getProperties();
         // device extensions
         std::vector<vk::ExtensionProperties> deviceExtensionProperties = gpu.enumerateDeviceExtensionProperties();
-        std::cout << "PhysicalDevice " << i << " : " << deviceExtensionProperties.size() << " extensions:" << std::endl;
+        std::cout << "PhysicalDevice " << GPU << " : " << deviceExtensionProperties.size() << " extensions:" << std::endl;
         std::sort(deviceExtensionProperties.begin(), deviceExtensionProperties.end(),
             [](vk::ExtensionProperties const &a, vk::ExtensionProperties const &b) {
                 return ::strcmp(a.extensionName, b.extensionName) < 0;
