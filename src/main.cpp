@@ -528,7 +528,7 @@ int main(int /*argc*/, char ** /*argv*/) {
         // pipeline
         vk::PipelineShaderStageCreateInfo pipelineShaderStageCreateInfo({}, vk::ShaderStageFlagBits::eCompute, computeShaderModule.get(), kernelName);
         vk::ComputePipelineCreateInfo computePipelineCreateInfo({}, pipelineShaderStageCreateInfo, pipelineLayout.get());
-        vk::UniquePipeline computePipeline = device->createComputePipelineUnique({}, computePipelineCreateInfo);
+        vk::ResultValue<vk::UniquePipeline> computePipeline = device->createComputePipelineUnique({}, computePipelineCreateInfo);
 
 
         // ---------------------------
@@ -561,7 +561,7 @@ int main(int /*argc*/, char ** /*argv*/) {
             commandBuffer->resetQueryPool(queryPool.get(), query * 2, query * 2 + 2);
             commandBuffer->writeTimestamp(vk::PipelineStageFlagBits::eTopOfPipe, queryPool.get(), query * 2);
             {
-                commandBuffer->bindPipeline(vk::PipelineBindPoint::eCompute, computePipeline.get());
+                commandBuffer->bindPipeline(vk::PipelineBindPoint::eCompute, computePipeline.value.get());
                 commandBuffer->bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipelineLayout.get(), 0, 1, &(descriptorSet.get()), 0, nullptr);
                 for (int i = 0; i < NUM_OF_DISPATCH; ++i) {
                     commandBuffer->dispatch(W*H/WORKGROUP_SIZE, 1, 1);
@@ -576,7 +576,7 @@ int main(int /*argc*/, char ** /*argv*/) {
             commandBuffer->resetQueryPool(queryPool.get(), query * 2, query * 2 + 2);
             commandBuffer->writeTimestamp(vk::PipelineStageFlagBits::eTopOfPipe, queryPool.get(), query * 2);
             {
-                commandBuffer->bindPipeline(vk::PipelineBindPoint::eCompute, computePipeline.get());
+                commandBuffer->bindPipeline(vk::PipelineBindPoint::eCompute, computePipeline.value.get());
                 commandBuffer->bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipelineLayout.get(), 0, 1, &(devDescriptorSet.get()), 0, nullptr);
                 for (int i = 0; i < NUM_OF_DISPATCH; ++i) {
                     commandBuffer->dispatch(W*H/WORKGROUP_SIZE, 1, 1);
