@@ -21,7 +21,7 @@ CXXFLAGS += -Wall -Werror --std=c++11 -O3
 # Vulkan
 SHADER_SRCS := $(shell find -L $(SRC_DIRS) -name *.vert -or -name *.frag -or -name *.comp)
 SHADER_OBJS := $(SHADER_SRCS:%=$(BUILD_DIR)/%.spv)
-SHADER_VER := 100
+SHADER_VER := vulkan1.3
 
 CPPFLAGS += -I$(HOME)/SDKs/Vulkan-Headers/include
 ifdef WSL_DISTRO_NAME
@@ -78,7 +78,7 @@ $(BUILD_DIR)/%.cpp.o: %.cpp
 # Vulkan source
 $(SHADER_OBJS): $(SHADER_SRCS)
 	$(MKDIR_P) $(dir $@)
-	glslangValidator -o $@ -V$(SHADER_VER) $<
+	glslangValidator -o $@ -V100 --target-env $(SHADER_VER) $<
 
 .PHONY: all clean
 
