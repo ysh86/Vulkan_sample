@@ -35,6 +35,7 @@ void main() {
     vec4 temp_a = {gl_LocalInvocationID.x, gl_LocalInvocationID.x+1, gl_LocalInvocationID.x+2, gl_LocalInvocationID.x+3};
     vec4 temp_0 = {gid, gid+1, gid+2, gid+3};
 
+    // vec4 x 1024 = 4096 times
     MAD_64(temp_a, temp_0);
     MAD_64(temp_a, temp_0);
     MAD_64(temp_a, temp_0);
