@@ -21,12 +21,11 @@ typedef struct {
     uint32_t r;//, g, b, a;
 } pixel_t;
 #if 0
-constexpr const int W = 1024 * 4;
-constexpr const int H = 1024 * 2 * 4;
+constexpr const int W = 1024 * 4 * 4 * 2;
 #else
 constexpr const int W = 1024;
-constexpr const int H = 1024 * 2;
 #endif
+constexpr const int H = 1024 * 2;
 constexpr const int WORKGROUP_SIZE = 256;
 
 constexpr const char *kernelFile = "build/src/hello.comp.spv";
