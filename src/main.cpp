@@ -640,7 +640,7 @@ int main(int /*argc*/, char ** /*argv*/) {
                 elapsed_ms = (t1 - t0 + std::numeric_limits<uint64_t>::max()) / 1000000.0 * properties.limits.timestampPeriod;
             }
             std::cout << "elapsed time [ms]: " << elapsed_ms << std::endl;
-            std::cout << "pinned bandwidth [GB/s]: " << totalRequiredSize * (1000.0 / elapsed_ms) / 1024 / 1024 / 1024 * NUM_OF_DISPATCH << std::endl;
+            std::cout << "pinned bandwidth [GB/s]: " << totalRequiredSize * (1000.0 / elapsed_ms) / 1000 / 1000 / 1000 * NUM_OF_DISPATCH << std::endl;
             std::cout << "pinned fma [GFLOPS]: " << (1000.0 / elapsed_ms) * 4/*vec4*/ * 2/*fma*/ * (64*16)/*num*/ * W*H * NUM_OF_DISPATCH / 1000 / 1000 / 1000 << std::endl;
             std::cout << std::endl;
         }
@@ -655,7 +655,7 @@ int main(int /*argc*/, char ** /*argv*/) {
                 elapsed_ms = (t1 - t0 + std::numeric_limits<uint64_t>::max()) / 1000000.0 * properties.limits.timestampPeriod;
             }
             std::cout << "elapsed time [ms]: " << elapsed_ms << std::endl;
-            std::cout << "dev bandwidth [GB/s]: " << totalRequiredSize * (1000.0 / elapsed_ms) / 1024 / 1024 / 1024 * NUM_OF_DISPATCH << std::endl;
+            std::cout << "dev bandwidth [GB/s]: " << totalRequiredSize * (1000.0 / elapsed_ms) / 1000 / 1000 / 1000 * NUM_OF_DISPATCH << std::endl;
             std::cout << "dev fma [GFLOPS]: " << (1000.0 / elapsed_ms) * 4/*vec4*/ * 2/*fma*/ * (64*16)/*num*/ * W*H * NUM_OF_DISPATCH / 1000 / 1000 / 1000 << std::endl;
             std::cout << std::endl;
         }
